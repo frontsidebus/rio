@@ -149,57 +149,74 @@ public sealed class SimConnectManager : IDisposable
     {
         if (_simConnect is null) return;
 
+        int sendCount = 0;
+
+        void RegFloat64(DataDefinitionId defId, string varName, string units)
+        {
+            Console.WriteLine($"  [{sendCount++}] {defId}: {varName} ({units})");
+            AddFloat64(_simConnect!, defId, varName, units);
+        }
+
+        void RegInt32(DataDefinitionId defId, string varName, string units)
+        {
+            Console.WriteLine($"  [{sendCount++}] {defId}: {varName} ({units})");
+            AddInt32(_simConnect!, defId, varName, units);
+        }
+
+        Console.WriteLine("[SimConnect] Registering data definitions...");
+
         // -- High-frequency data (position, attitude, speeds) --
         var hf = DataDefinitionId.HighFrequency;
-        AddFloat64(_simConnect, hf, "PLANE LATITUDE", "degrees");
-        AddFloat64(_simConnect, hf, "PLANE LONGITUDE", "degrees");
-        AddFloat64(_simConnect, hf, "PLANE ALTITUDE", "feet");
-        AddFloat64(_simConnect, hf, "PLANE ALT ABOVE GROUND", "feet");
-        AddFloat64(_simConnect, hf, "PLANE PITCH DEGREES", "degrees");
-        AddFloat64(_simConnect, hf, "PLANE BANK DEGREES", "degrees");
-        AddFloat64(_simConnect, hf, "PLANE HEADING DEGREES TRUE", "degrees");
-        AddFloat64(_simConnect, hf, "PLANE HEADING DEGREES MAGNETIC", "degrees");
-        AddFloat64(_simConnect, hf, "AIRSPEED INDICATED", "knots");
-        AddFloat64(_simConnect, hf, "AIRSPEED TRUE", "knots");
-        AddFloat64(_simConnect, hf, "GROUND VELOCITY", "knots");
-        AddFloat64(_simConnect, hf, "AIRSPEED MACH", "mach");
-        AddFloat64(_simConnect, hf, "VERTICAL SPEED", "feet per minute");
+        RegFloat64(hf, "PLANE LATITUDE", "degrees");
+        RegFloat64(hf, "PLANE LONGITUDE", "degrees");
+        RegFloat64(hf, "PLANE ALTITUDE", "feet");
+        RegFloat64(hf, "PLANE ALT ABOVE GROUND", "feet");
+        RegFloat64(hf, "PLANE PITCH DEGREES", "degrees");
+        RegFloat64(hf, "PLANE BANK DEGREES", "degrees");
+        RegFloat64(hf, "PLANE HEADING DEGREES TRUE", "degrees");
+        RegFloat64(hf, "PLANE HEADING DEGREES MAGNETIC", "degrees");
+        RegFloat64(hf, "AIRSPEED INDICATED", "knots");
+        RegFloat64(hf, "AIRSPEED TRUE", "knots");
+        RegFloat64(hf, "GROUND VELOCITY", "knots");
+        RegFloat64(hf, "AIRSPEED MACH", "mach");
+        RegFloat64(hf, "VERTICAL SPEED", "feet per minute");
 
         // -- Low-frequency data (autopilot, radios, fuel, surfaces, environment) --
         var lf = DataDefinitionId.LowFrequency;
-        AddInt32(_simConnect, lf, "AUTOPILOT MASTER", "bool");
-        AddFloat64(_simConnect, lf, "AUTOPILOT HEADING LOCK DIR", "degrees");
-        AddFloat64(_simConnect, lf, "AUTOPILOT ALTITUDE LOCK VAR", "feet");
-        AddFloat64(_simConnect, lf, "AUTOPILOT VERTICAL HOLD VAR", "feet per minute");
-        AddFloat64(_simConnect, lf, "AUTOPILOT AIRSPEED HOLD VAR", "knots");
-        AddFloat64(_simConnect, lf, "COM ACTIVE FREQUENCY:1", "MHz");
-        AddFloat64(_simConnect, lf, "COM ACTIVE FREQUENCY:2", "MHz");
-        AddFloat64(_simConnect, lf, "NAV ACTIVE FREQUENCY:1", "MHz");
-        AddFloat64(_simConnect, lf, "NAV ACTIVE FREQUENCY:2", "MHz");
-        AddFloat64(_simConnect, lf, "FUEL TOTAL QUANTITY", "gallons");
-        AddFloat64(_simConnect, lf, "FUEL TOTAL QUANTITY WEIGHT", "pounds");
-        AddInt32(_simConnect, lf, "GEAR HANDLE POSITION", "bool");
-        AddFloat64(_simConnect, lf, "TRAILING EDGE FLAPS LEFT PERCENT", "percent");
-        AddFloat64(_simConnect, lf, "SPOILERS HANDLE POSITION", "percent");
-        AddFloat64(_simConnect, lf, "AMBIENT WIND VELOCITY", "knots");
-        AddFloat64(_simConnect, lf, "AMBIENT WIND DIRECTION", "degrees");
-        AddFloat64(_simConnect, lf, "AMBIENT VISIBILITY", "statute miles");
-        AddFloat64(_simConnect, lf, "AMBIENT TEMPERATURE", "celsius");
-        AddFloat64(_simConnect, lf, "BAROMETER PRESSURE", "inches of mercury");
+        RegInt32(lf, "AUTOPILOT MASTER", "bool");
+        RegFloat64(lf, "AUTOPILOT HEADING LOCK DIR", "degrees");
+        RegFloat64(lf, "AUTOPILOT ALTITUDE LOCK VAR", "feet");
+        RegFloat64(lf, "AUTOPILOT VERTICAL HOLD VAR", "feet per minute");
+        RegFloat64(lf, "AUTOPILOT AIRSPEED HOLD VAR", "knots");
+        RegFloat64(lf, "COM ACTIVE FREQUENCY:1", "MHz");
+        RegFloat64(lf, "COM ACTIVE FREQUENCY:2", "MHz");
+        RegFloat64(lf, "NAV ACTIVE FREQUENCY:1", "MHz");
+        RegFloat64(lf, "NAV ACTIVE FREQUENCY:2", "MHz");
+        RegFloat64(lf, "FUEL TOTAL QUANTITY", "gallons");
+        RegFloat64(lf, "FUEL TOTAL QUANTITY WEIGHT", "pounds");
+        RegInt32(lf, "GEAR HANDLE POSITION", "bool");
+        RegFloat64(lf, "FLAPS HANDLE PERCENT", "percent");
+        RegFloat64(lf, "SPOILERS HANDLE POSITION", "percent");
+        RegFloat64(lf, "AMBIENT WIND VELOCITY", "knots");
+        RegFloat64(lf, "AMBIENT WIND DIRECTION", "degrees");
+        RegFloat64(lf, "AMBIENT VISIBILITY", "meters");
+        RegFloat64(lf, "AMBIENT TEMPERATURE", "celsius");
+        RegFloat64(lf, "KOHLSMAN SETTING HG", "inHg");
 
         // -- Engine data (4 engines x 6 params) --
         var eng = DataDefinitionId.EngineData;
         for (int i = 1; i <= 4; i++)
         {
-            AddFloat64(_simConnect, eng, $"GENERAL ENG RPM:{i}", "rpm");
-            AddFloat64(_simConnect, eng, $"ENG MANIFOLD PRESSURE:{i}", "inHg");
-            AddFloat64(_simConnect, eng, $"ENG FUEL FLOW GPH:{i}", "gallons per hour");
-            AddFloat64(_simConnect, eng, $"ENG EXHAUST GAS TEMPERATURE:{i}", "rankine");
-            AddFloat64(_simConnect, eng, $"ENG OIL TEMPERATURE:{i}", "rankine");
-            AddFloat64(_simConnect, eng, $"ENG OIL PRESSURE:{i}", "psf");
+            RegFloat64(eng, $"GENERAL ENG RPM:{i}", "rpm");
+            RegFloat64(eng, $"ENG MANIFOLD PRESSURE:{i}", "inHg");
+            RegFloat64(eng, $"ENG FUEL FLOW GPH:{i}", "gallons per hour");
+            RegFloat64(eng, $"ENG EXHAUST GAS TEMPERATURE:{i}", "rankine");
+            RegFloat64(eng, $"ENG OIL TEMPERATURE:{i}", "rankine");
+            RegFloat64(eng, $"ENG OIL PRESSURE:{i}", "psf");
         }
 
         // -- Aircraft title (string) --
+        Console.WriteLine($"  [{sendCount++}] AircraftTitle: TITLE (string256)");
         _simConnect.AddToDataDefinition(
             DataDefinitionId.AircraftTitle,
             "TITLE",
@@ -214,7 +231,7 @@ public sealed class SimConnectManager : IDisposable
         _simConnect.RegisterDataDefineStruct<EngineDataStruct>(DataDefinitionId.EngineData);
         _simConnect.RegisterDataDefineStruct<AircraftTitleData>(DataDefinitionId.AircraftTitle);
 
-        Console.WriteLine("[SimConnect] Data definitions registered.");
+        Console.WriteLine($"[SimConnect] {sendCount} data definitions registered.");
     }
 
     private static void AddFloat64(SimConnect sc, DataDefinitionId defId, string varName, string units)
@@ -269,43 +286,33 @@ public sealed class SimConnectManager : IDisposable
                 SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
                 0, 0, 0);
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            HandleDisconnect();
+            Console.WriteLine($"[SimConnect] HF request failed: 0x{ex.HResult:X8}");
         }
     }
 
     private void RequestLowFrequencyData()
     {
+        SafeRequest(DataRequestId.LowFrequency, DataDefinitionId.LowFrequency, "LF");
+        SafeRequest(DataRequestId.EngineData, DataDefinitionId.EngineData, "Engine");
+        SafeRequest(DataRequestId.AircraftTitle, DataDefinitionId.AircraftTitle, "Title");
+    }
+
+    private void SafeRequest(DataRequestId reqId, DataDefinitionId defId, string label)
+    {
         try
         {
             _simConnect?.RequestDataOnSimObject(
-                DataRequestId.LowFrequency,
-                DataDefinitionId.LowFrequency,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_PERIOD.ONCE,
-                SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
-                0, 0, 0);
-
-            _simConnect?.RequestDataOnSimObject(
-                DataRequestId.EngineData,
-                DataDefinitionId.EngineData,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_PERIOD.ONCE,
-                SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
-                0, 0, 0);
-
-            _simConnect?.RequestDataOnSimObject(
-                DataRequestId.AircraftTitle,
-                DataDefinitionId.AircraftTitle,
+                reqId, defId,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_PERIOD.ONCE,
                 SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
                 0, 0, 0);
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            HandleDisconnect();
+            Console.WriteLine($"[SimConnect] {label} request failed: 0x{ex.HResult:X8}");
         }
     }
 
@@ -313,15 +320,28 @@ public sealed class SimConnectManager : IDisposable
     //  Message pump (required for out-of-process SimConnect)
     // -----------------------------------------------------------------------
 
+    private int _consecutiveErrors;
+
     private void ReceiveMessages()
     {
         try
         {
             _simConnect?.ReceiveMessage();
+            _consecutiveErrors = 0; // Reset on success
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            HandleDisconnect();
+            _consecutiveErrors++;
+            if (_consecutiveErrors <= 3)
+            {
+                Console.WriteLine($"[SimConnect] COM error in message pump: 0x{ex.HResult:X8} (attempt {_consecutiveErrors})");
+            }
+            else if (_consecutiveErrors > 50)
+            {
+                // Sustained failures means genuine disconnection
+                Console.WriteLine($"[SimConnect] Sustained COM errors ({_consecutiveErrors}), treating as disconnect.");
+                HandleDisconnect();
+            }
         }
     }
 
@@ -343,7 +363,15 @@ public sealed class SimConnectManager : IDisposable
 
     private void OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION data)
     {
-        Console.WriteLine($"[SimConnect] Exception: {(SIMCONNECT_EXCEPTION)data.dwException} (SendID={data.dwSendID}, Index={data.dwIndex})");
+        var ex = (SIMCONNECT_EXCEPTION)data.dwException;
+        Console.WriteLine($"[SimConnect] Exception: {ex} (SendID={data.dwSendID}, Index={data.dwIndex})");
+
+        // NAME_UNRECOGNIZED and other definition errors are non-fatal warnings.
+        // Only treat connection-level errors as disconnects.
+        if (ex == SIMCONNECT_EXCEPTION.ERROR)
+        {
+            HandleDisconnect();
+        }
     }
 
     /// <summary>

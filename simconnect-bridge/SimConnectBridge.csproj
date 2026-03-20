@@ -28,6 +28,14 @@
     <None Remove="SimConnectBridge.Tests\**" />
   </ItemGroup>
 
+  <!-- Copy native SimConnect.dll to output so the managed wrapper can P/Invoke it -->
+  <ItemGroup>
+    <None Include="C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>SimConnect.dll</Link>
+    </None>
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
