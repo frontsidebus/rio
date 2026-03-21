@@ -135,6 +135,7 @@ airdale/
 ├── docker-compose.yml      # Whisper, ChromaDB, orchestrator services
 ├── .env.example            # Environment variable template
 └── docs/
+    ├── ARCHITECTURE.md     # System architecture deep-dive
     └── INSTALL.md          # Detailed installation guide
 ```
 
@@ -143,6 +144,7 @@ airdale/
 ## Documentation
 
 - [Installation Guide](docs/INSTALL.md) -- full setup walkthrough with troubleshooting
+- [Architecture](docs/ARCHITECTURE.md) -- system design, data flows, and component descriptions
 - [Project Conventions](CLAUDE.md) -- architecture decisions, code style, development commands
 
 ---

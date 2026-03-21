@@ -12,10 +12,10 @@ cancelled immediately.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import math
-import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from orchestrator.config import load_settings  # noqa: E402
 from orchestrator.context_store import ContextStore  # noqa: E402
 from orchestrator.flight_phase import FlightPhaseDetector  # noqa: E402
 from orchestrator.sim_client import SimConnectClient, SimState  # noqa: E402
+from orchestrator.tts_preprocessor import preprocess_for_tts  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -123,7 +124,7 @@ async def _prepopulate_tts_cache() -> None:
 
     client = await _get_tts_client()
     for phrase in _CACHEABLE_PHRASES:
-        sanitized = _sanitize_for_tts(phrase)
+        sanitized = preprocess_for_tts(phrase)
         if not sanitized or sanitized in _TTS_CACHE:
             continue
         try:
@@ -206,7 +207,12 @@ async def lifespan(app: FastAPI):
     )
 
     # Pre-populate TTS cache in the background (non-blocking)
-    asyncio.create_task(_prepopulate_tts_cache())
+    _cache_task = asyncio.create_task(_prepopulate_tts_cache())
+    _cache_task.add_done_callback(
+        lambda t: logger.error("TTS cache prepopulation failed: %s", t.exception())
+        if t.exception()
+        else None
+    )
 
     logger.info("MERLIN web server ready on port 3838")
     yield
@@ -352,7 +358,7 @@ async def text_to_speech(request: TTSRequest):
         )
 
     # Check TTS cache first
-    clean = _sanitize_for_tts(request.text)
+    clean = preprocess_for_tts(request.text)
     if clean in _TTS_CACHE:
         return Response(content=_TTS_CACHE[clean], media_type="audio/mpeg")
 
@@ -666,8 +672,6 @@ async def _tts_websocket_stream(
                             # Some responses include base64 audio
                             audio_b64 = data.get("audio")
                             if audio_b64:
-                                import base64
-
                                 audio_chunk = base64.b64decode(audio_b64)
                                 if audio_chunk:
                                     await ws.send_json({
@@ -697,7 +701,7 @@ async def _tts_websocket_stream(
                 if interrupt.is_set():
                     break
 
-                clean_text = _sanitize_for_tts(sentence)
+                clean_text = preprocess_for_tts(sentence)
                 if not clean_text:
                     continue
 
@@ -860,108 +864,9 @@ async def _stream_response(
 # Helpers
 # ---------------------------------------------------------------------------
 
-_MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
-
-
-def _sanitize_for_tts(text: str) -> str:
-    """Strip markdown, special characters, and convert shorthand for clean TTS.
-
-    Converts LLM output into plain speakable text so ElevenLabs doesn't
-    try to pronounce asterisks, bullets, dashes, or formatting tokens.
-    """
-    # --- Markdown removal (order matters) ---
-
-    # Code blocks (``` ... ```) -> just the content
-    text = re.sub(r"```[^\n]*\n(.*?)```", r"\1", text, flags=re.DOTALL)
-
-    # Inline code `text` -> just text
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-
-    # Markdown links [text](url) -> just the link text
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-
-    # Bold+italic ***text*** or ___text___
-    text = re.sub(r"\*{3}(.+?)\*{3}", r"\1", text)
-    text = re.sub(r"_{3}(.+?)_{3}", r"\1", text)
-
-    # Bold **text** or __text__
-    text = re.sub(r"\*{2}(.+?)\*{2}", r"\1", text)
-    text = re.sub(r"_{2}(.+?)_{2}", r"\1", text)
-
-    # Italic *text* or _text_ (not mid-word underscores like pre_flight)
-    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", text)
-    text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"\1", text)
-
-    # Strikethrough ~~text~~
-    text = re.sub(r"~~(.+?)~~", r"\1", text)
-
-    # Headings: ### text -> text
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-
-    # Blockquotes: > text -> text
-    text = re.sub(r"^>\s*", "", text, flags=re.MULTILINE)
-
-    # Horizontal rules (---, ***, ___) -> pause
-    text = re.sub(r"^[-*_]{3,}\s*$", ".", text, flags=re.MULTILINE)
-
-    # Bullet points (-, *, bullet) at line start -> natural pause
-    text = re.sub(r"^\s*[-*\u2022]\s+", ". ", text, flags=re.MULTILINE)
-
-    # Numbered lists: 1. or 1) -> natural pause
-    text = re.sub(r"^\s*\d+[.)]\s+", ". ", text, flags=re.MULTILINE)
-
-    # --- Special character replacement ---
-
-    # Any remaining stray asterisks (not caught by patterns above)
-    text = text.replace("*", "")
-
-    # Dashes and hyphens
-    text = text.replace("\u2014", ", ")   # em dash
-    text = text.replace("\u2013", " to ")  # en dash
-    # Leave regular hyphens in compound words (pre-flight, cross-check)
-
-    # Other symbols
-    text = text.replace("\u2026", "...")
-    text = text.replace("\u00b0", " degrees")
-    text = text.replace("\u00b1", " plus or minus ")
-    text = text.replace("&", " and ")
-    text = text.replace("|", ", ")
-    text = text.replace("~", "approximately ")
-
-    # Slash: preserve in frequencies like 121.7/118.3, expand otherwise
-    text = re.sub(r"(\d)\s*/\s*(\d)", r"\1 slash \2", text)
-    text = re.sub(r"(?<!\d)/(?!\d)", " ", text)
-
-    # --- Aviation abbreviation expansion ---
-
-    text = re.sub(r"\bft\b", "feet", text)
-    text = re.sub(r"\bkts?\b", "knots", text)
-    text = re.sub(r"\bfpm\b", "feet per minute", text)
-    text = re.sub(r"\bnm\b", "nautical miles", text)
-    text = re.sub(r"\bFL(\d+)\b", r"flight level \1", text)
-    text = re.sub(
-        r"\bRWY\s*(\d+[LRC]?)\b",
-        r"runway \1",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(r"\bHDG\b", "heading", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bALT\b", "altitude", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bIAS\b", "indicated airspeed", text)
-    text = re.sub(r"\bVS\b", "vertical speed", text)
-    text = re.sub(r"\bAP\b", "autopilot", text)
-    text = re.sub(r"\binHg\b", "inches of mercury", text)
-
-    # --- Whitespace cleanup ---
-
-    text = _MULTI_SPACE_RE.sub(" ", text)
-    # Collapse multiple newlines into a sentence break
-    text = re.sub(r"\n+", ". ", text)
-    # Clean up repeated periods/commas from list conversions
-    text = re.sub(r"[.,]{2,}", ".", text)
-    text = re.sub(r"\.\s*,", ".", text)
-
-    return text.strip()
+# NOTE: TTS text sanitization uses orchestrator.tts_preprocessor.preprocess_for_tts
+# which is imported at the top of this file. All TTS text cleaning is handled
+# by that single module to avoid duplication.
 
 
 def _split_at_sentence(text: str) -> tuple[str, str]:
@@ -1003,7 +908,7 @@ async def _send_tts_chunk_rest(ws: WebSocket, text: str) -> None:
 
     This is the REST-based fallback used when WebSocket TTS is unavailable.
     """
-    clean_text = _sanitize_for_tts(text)
+    clean_text = preprocess_for_tts(text)
     if not clean_text:
         return
 
@@ -1099,6 +1004,9 @@ async def _transcribe_with_confidence(
         )
         return text, confidence
     except httpx.HTTPError as exc:
+        logger.error("Whisper transcription HTTP error: %s", exc)
+        return "", 0.0
+    except Exception as exc:
         logger.error("Whisper transcription failed: %s", exc)
         return "", 0.0
 
@@ -1125,39 +1033,3 @@ async def _transcribe_audio_bytes_with_confidence(
         audio_bytes = await convert_webm_to_wav_normalized(audio_bytes)
 
     return await _transcribe_with_confidence(audio_bytes)
-
-
-async def _transcribe_audio_bytes(
-    audio_bytes: bytes,
-    mime_type: str = "audio/webm",
-) -> str:
-    """Convert browser audio to wav and send to Whisper. Legacy wrapper."""
-    text, _ = await _transcribe_audio_bytes_with_confidence(
-        audio_bytes, mime_type
-    )
-    return text
-
-
-async def _transcribe_base64_audio(audio_b64: str) -> str:
-    """Decode base64 audio and send to Whisper for transcription."""
-    import base64
-
-    try:
-        audio_bytes = base64.b64decode(audio_b64)
-    except Exception:
-        logger.warning("Failed to decode base64 audio")
-        return ""
-
-    # Try sending webm directly first, fall back to ffmpeg conversion
-    text, confidence = await _transcribe_audio_bytes_with_confidence(
-        audio_bytes, "audio/webm"
-    )
-
-    if confidence < _LOW_CONFIDENCE_THRESHOLD:
-        logger.warning(
-            "Low confidence base64 transcription (%.2f): '%s'",
-            confidence,
-            text[:60],
-        )
-
-    return text

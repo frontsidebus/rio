@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phrase cache eliminates TTS round-trip for common responses (Roger, Copy that, etc.)
 
 ### Tests
-- Test count increased from 287 to 351
+- Test count increased from 287 to 361
 
 ## [1.0.0] - 2026-03-21
 

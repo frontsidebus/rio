@@ -8,9 +8,10 @@ The server exposes an OpenAI-compatible /v1/audio/transcriptions endpoint.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -26,9 +27,6 @@ _DEFAULT_MODEL = "medium"
 _DEFAULT_TIMEOUT = 30.0
 _MAX_RETRIES = 3
 _RETRY_BACKOFF = 1.5  # seconds, multiplied by attempt number
-
-# Confidence threshold below which a transcription is considered unreliable
-_LOW_CONFIDENCE_THRESHOLD = 0.4
 
 
 @dataclass
@@ -232,7 +230,7 @@ class WhisperClient:
         msg = f"Whisper transcription failed after {_MAX_RETRIES} attempts"
         raise WhisperClientError(msg) from last_error
 
-    def _parse_verbose_response(self, data: dict) -> TranscriptionResult:
+    def _parse_verbose_response(self, data: dict[str, Any]) -> TranscriptionResult:
         """Extract text, confidence, language, and duration from verbose_json response."""
         text = data.get("text", "").strip()
         detected_lang = data.get("language", self.language or "en")
@@ -243,8 +241,6 @@ class WhisperClient:
         # We map it to 0..1 using: confidence = exp(avg_logprob).
         segments = data.get("segments", [])
         if segments:
-            import math
-
             logprobs = [s.get("avg_logprob", -1.0) for s in segments]
             avg_logprob = sum(logprobs) / len(logprobs)
             # exp(-1.0) ~ 0.37, exp(-0.2) ~ 0.82, exp(0) = 1.0

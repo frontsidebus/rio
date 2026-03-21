@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from enum import Enum
+from enum import StrEnum
 
 import httpx
 import numpy as np
@@ -24,7 +24,7 @@ from .audio_processing import (
 logger = logging.getLogger(__name__)
 
 
-class InputMode(str, Enum):
+class InputMode(StrEnum):
     PUSH_TO_TALK = "push_to_talk"
     VOICE_ACTIVITY = "voice_activity"
 
@@ -213,9 +213,6 @@ class VoiceInput:
                 logger.warning("Whisper transcription failed: %s", e)
                 return ""
 
-    def _audio_to_wav_bytes(self, audio: np.ndarray) -> bytes:
-        return samples_to_wav_bytes(audio, self._sample_rate, self._channels)
-
     async def listen(self) -> str:
         """Record based on current mode and return transcription."""
         if self._mode == InputMode.PUSH_TO_TALK:
@@ -353,7 +350,7 @@ class VoiceOutput:
 
     async def _play_mp3(self, mp3_data: bytes) -> None:
         """Decode MP3 via ffmpeg subprocess and play as PCM through sounddevice."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             pcm_data = await self._decode_mp3(mp3_data)
             if pcm_data is not None and not self._cancelled:

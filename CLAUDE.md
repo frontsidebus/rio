@@ -229,7 +229,7 @@ SIMCONNECT_WS_HOST=$(hostname).local       # WSL2 native
 
 ## Testing Approach
 
-- **351 tests passing** across Python and C# test suites.
+- **361 tests passing** across Python and C# test suites.
 - **Python:** pytest + pytest-asyncio for async tests. Mock the WebSocket connection and Claude API in unit tests.
 - **C#:** xUnit. Mock SimConnect for unit tests. Integration tests require MSFS running.
 - **No sim required for most tests** -- Record telemetry snapshots as JSON fixtures and replay them through the orchestrator.

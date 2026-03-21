@@ -65,6 +65,41 @@ _RWY_SUFFIX: dict[str, str] = {
     "C": " center",
 }
 
+# Aviation acronyms that TTS engines mangle if not expanded.
+# Map uppercase acronym → spaced-out letters or spoken form.
+_AVIATION_ACRONYMS: dict[str, str] = {
+    "NOTAM": "NOTAM",  # already a pronounceable word
+    "SIGMET": "SIGMET",  # already pronounceable
+    "PIREP": "pilot report",
+    "ATIS": "ATIS",  # already pronounceable
+    "UNICOM": "UNICOM",  # already pronounceable
+    "CTAF": "C TAF",
+    "IFR": "I F R",
+    "VFR": "V F R",
+    "AGL": "A G L",
+    "MSL": "M S L",
+    "RNAV": "R NAV",
+    "TCAS": "T CAS",
+    "GPWS": "G P W S",
+    "EGPWS": "E G P W S",
+    "ELT": "E L T",
+    "NDB": "N D B",
+    "VOR": "V O R",
+    "ILS": "I L S",
+    "GPS": "G P S",
+    "FMS": "F M S",
+    "CDU": "C D U",
+    "MDA": "M D A",
+    "DH": "D H",
+    "DA": "D A",
+    "MEA": "M E A",
+    "MOCA": "M O C A",
+    "SID": "SID",  # pronounceable
+    "STAR": "STAR",  # pronounceable
+    "METAR": "METAR",  # pronounceable
+    "TAF": "TAF",  # pronounceable
+}
+
 
 # ---------------------------------------------------------------------------
 # Number helpers
@@ -283,6 +318,18 @@ def _expand_qnh(text: str) -> str:
     return text
 
 
+def _expand_aviation_acronyms(text: str) -> str:
+    """Expand aviation acronyms that TTS engines mispronounce.
+
+    Only expands standalone uppercase acronyms (word boundaries) to avoid
+    mangling words that happen to contain the same letters.
+    """
+    for acronym, spoken in _AVIATION_ACRONYMS.items():
+        if acronym != spoken:
+            text = re.sub(rf"\b{acronym}\b", spoken, text)
+    return text
+
+
 def _expand_distance(text: str) -> str:
     """5nm → five nautical miles; DME 12.3 → D M E one two point tree."""
     # NM / nm distances
@@ -433,6 +480,9 @@ def preprocess_for_tts(text: str) -> str:
     text = _expand_speed(text)
     # Altitudes (3500ft, 3,500 feet)
     text = _expand_altitude(text)
+
+    # Aviation acronyms (after specific patterns to avoid interfering)
+    text = _expand_aviation_acronyms(text)
 
     # --- General cleanup ---
     text = _strip_markdown(text)

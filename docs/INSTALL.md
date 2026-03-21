@@ -139,7 +139,7 @@ docker compose ps
 curl http://localhost:9090/health
 
 # ChromaDB health
-curl http://localhost:8000/api/v1/heartbeat
+curl http://localhost:8000/api/v2/heartbeat
 ```
 
 ### 7. Start the SimConnect Bridge
@@ -233,7 +233,7 @@ Recent versions of ChromaDB have migrated to a v2 API. If you see errors related
   rm -rf data/chroma_db
   docker compose restart chromadb
   ```
-- The orchestrator uses the ChromaDB HTTP client. Verify the endpoint: `curl http://localhost:8000/api/v1/heartbeat`
+- The orchestrator uses the ChromaDB HTTP client. Verify the endpoint: `curl http://localhost:8000/api/v2/heartbeat`
 
 ### Bridge Connects but No Telemetry
 

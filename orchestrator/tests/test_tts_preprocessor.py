@@ -267,7 +267,7 @@ class TestCombined:
             ),
             (
                 "Cleared ILS RWY 27L, maintain 250kt until 5nm",
-                "Cleared ILS runway two seven left, maintain two hundred"
+                "Cleared I L S runway two seven left, maintain two hundred"
                 " fifty knots until five nautical miles",
             ),
         ],
@@ -303,3 +303,35 @@ class TestEdgeCases:
         assert "First" in result
         assert "Second" in result
         assert "-" not in result
+
+
+# ---------------------------------------------------------------------------
+# Aviation acronyms
+# ---------------------------------------------------------------------------
+
+
+class TestAviationAcronyms:
+    @pytest.mark.parametrize(
+        "input_text,expected",
+        [
+            ("Check the IFR chart", "Check the I F R chart"),
+            ("File VFR", "File V F R"),
+            ("Altitude 500 AGL", "Altitude 500 A G L"),
+            ("Altitude 3000 MSL", "Altitude 3000 M S L"),
+            ("PIREP reported", "pilot report reported"),
+            ("Fly the RNAV approach", "Fly the R NAV approach"),
+            ("TCAS alert", "T CAS alert"),
+            ("GPWS warning", "G P W S warning"),
+            ("Tune the VOR", "Tune the V O R"),
+            ("Cleared ILS approach", "Cleared I L S approach"),
+            ("GPS direct", "G P S direct"),
+        ],
+    )
+    def test_acronym_expansion(self, input_text: str, expected: str) -> None:
+        assert preprocess_for_tts(input_text) == expected
+
+    def test_pronounceable_acronyms_unchanged(self) -> None:
+        """Acronyms that are already pronounceable should pass through."""
+        for word in ("NOTAM", "SIGMET", "ATIS", "UNICOM", "SID", "STAR", "METAR", "TAF"):
+            result = preprocess_for_tts(f"Check the {word}")
+            assert word in result

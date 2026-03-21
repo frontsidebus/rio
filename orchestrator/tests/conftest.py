@@ -45,6 +45,7 @@ def mock_env_vars(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "ANTHROPIC_API_KEY": "sk-ant-test-key-000",
         "ELEVENLABS_API_KEY": "el-test-key",
         "ELEVENLABS_VOICE_ID": "test-voice-id",
+        "ELEVENLABS_MODEL_ID": "eleven_multilingual_v2",
         "SIMCONNECT_BRIDGE_URL": "ws://localhost:9999",
         "WHISPER_MODEL": "tiny",
         "WHISPER_URL": "http://localhost:9090",
@@ -52,6 +53,7 @@ def mock_env_vars(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "SCREEN_CAPTURE_FPS": "2",
         "CLAUDE_MODEL": "claude-sonnet-4-20250514",
         "CHROMADB_URL": "http://chromadb-test:9999",
+        "LOG_LEVEL": "DEBUG",
     }
     for k, v in env.items():
         monkeypatch.setenv(k, v)

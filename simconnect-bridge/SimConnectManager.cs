@@ -22,6 +22,7 @@ public sealed class SimConnectManager : IDisposable
 
     private Timer? _highFreqTimer;
     private Timer? _lowFreqTimer;
+    private Timer? _fallbackTimer;
     private Thread? _messagePumpThread;
     private EventWaitHandle? _simConnectEvent;
     private bool _connected;
@@ -29,7 +30,6 @@ public sealed class SimConnectManager : IDisposable
     private bool _autoReconnect = true;
     private CancellationTokenSource? _reconnectCts;
     private volatile bool _pumpRunning;
-    private bool _flightActive;
     private bool _dataSubscribed;
 
     /// <summary>
@@ -193,6 +193,8 @@ public sealed class SimConnectManager : IDisposable
     {
         _autoReconnect = false;
         _reconnectCts?.Cancel();
+        _reconnectCts?.Dispose();
+        _reconnectCts = null;
         StopTimers();
 
         if (_simConnect is not null)
@@ -400,6 +402,8 @@ public sealed class SimConnectManager : IDisposable
         _highFreqTimer = null;
         _lowFreqTimer?.Dispose();
         _lowFreqTimer = null;
+        _fallbackTimer?.Dispose();
+        _fallbackTimer = null;
 
         // Stop the event-driven message pump
         _pumpRunning = false;
@@ -489,24 +493,27 @@ public sealed class SimConnectManager : IDisposable
         {
             case SimEventId.FlightLoaded:
                 Log("INFO", "Flight loaded — starting data subscriptions");
-                _flightActive = true;
-                FlightStateChanged?.Invoke(true);
-                StartDataSubscriptions();
-                break;
-
-            case SimEventId.SimStart:
-                Log("INFO", "Sim started");
-                if (!_dataSubscribed)
+                lock (_lock)
                 {
-                    _flightActive = true;
                     FlightStateChanged?.Invoke(true);
                     StartDataSubscriptions();
                 }
                 break;
 
+            case SimEventId.SimStart:
+                Log("INFO", "Sim started");
+                lock (_lock)
+                {
+                    if (!_dataSubscribed)
+                    {
+                        FlightStateChanged?.Invoke(true);
+                        StartDataSubscriptions();
+                    }
+                }
+                break;
+
             case SimEventId.SimStop:
                 Log("INFO", "Sim stopped — flight ended, idling");
-                _flightActive = false;
                 FlightStateChanged?.Invoke(false);
                 break;
 
@@ -532,12 +539,16 @@ public sealed class SimConnectManager : IDisposable
         //
         // As a fallback, try after 5s in case the events don't fire (some
         // MSFS versions/states may not emit FlightLoaded on reconnect).
-        var fallbackTimer = new Timer(_ =>
+        _fallbackTimer?.Dispose();
+        _fallbackTimer = new Timer(_ =>
         {
-            if (!_dataSubscribed && _connected)
+            lock (_lock)
             {
-                Log("INFO", "No flight event received — trying data subscriptions anyway");
-                StartDataSubscriptions();
+                if (!_dataSubscribed && _connected)
+                {
+                    Log("INFO", "No flight event received — trying data subscriptions anyway");
+                    StartDataSubscriptions();
+                }
             }
         }, null, 5000, Timeout.Infinite);
     }
@@ -676,7 +687,6 @@ public sealed class SimConnectManager : IDisposable
     {
         if (!_connected) return;
         _connected = false;
-        _flightActive = false;
         _dataSubscribed = false;
         CurrentState.Connected = false;
         StopTimers();

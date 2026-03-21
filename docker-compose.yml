@@ -65,7 +65,11 @@ services:
       - ./data/chroma_db:/chroma/chroma
     restart: unless-stopped
     healthcheck:
-      disable: true
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - merlin
 
@@ -79,12 +83,12 @@ services:
       dockerfile: Dockerfile
     container_name: merlin-orchestrator
     ports:
-      - "8081:8081"
+      - "3838:3838"
     depends_on:
       whisper:
         condition: service_healthy
       chromadb:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env
     environment:

@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import websockets
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
-class FlightPhase(str, Enum):
+class FlightPhase(StrEnum):
     PREFLIGHT = "PREFLIGHT"
     TAXI = "TAXI"
     TAKEOFF = "TAKEOFF"
@@ -33,7 +33,7 @@ class FlightPhase(str, Enum):
 # ---------------------------------------------------------------------------
 
 
-class ConnectionState(str, Enum):
+class ConnectionState(StrEnum):
     """WebSocket connection lifecycle states."""
 
     DISCONNECTED = "DISCONNECTED"
@@ -352,34 +352,31 @@ class SimConnectClient:
         If no message has been received within HEARTBEAT_TIMEOUT, the
         connection is considered stale and a reconnect is triggered.
         """
-        try:
-            while True:
-                await asyncio.sleep(self.HEARTBEAT_INTERVAL)
-                age = self.last_message_age
-                if age > self.HEARTBEAT_TIMEOUT:
-                    logger.warning(
-                        "No data from bridge for %.1fs (timeout=%.1fs); "
-                        "connection may be stale",
-                        age,
-                        self.HEARTBEAT_TIMEOUT,
-                    )
-                    # Send a ping to verify the connection is alive
-                    if self._ws is not None:
-                        try:
-                            pong = await asyncio.wait_for(
-                                self._ws.ping(), timeout=5.0
-                            )
-                            await asyncio.wait_for(pong, timeout=5.0)
-                            logger.debug("Ping/pong succeeded; connection alive")
-                        except Exception:
-                            logger.warning(
-                                "Ping failed; triggering reconnect"
-                            )
-                            if self._ws is not None:
-                                await self._ws.close()
-                            break
-        except asyncio.CancelledError:
-            raise
+        while True:
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+            age = self.last_message_age
+            if age > self.HEARTBEAT_TIMEOUT:
+                logger.warning(
+                    "No data from bridge for %.1fs (timeout=%.1fs); "
+                    "connection may be stale",
+                    age,
+                    self.HEARTBEAT_TIMEOUT,
+                )
+                # Send a ping to verify the connection is alive
+                if self._ws is not None:
+                    try:
+                        pong = await asyncio.wait_for(
+                            self._ws.ping(), timeout=5.0
+                        )
+                        await asyncio.wait_for(pong, timeout=5.0)
+                        logger.debug("Ping/pong succeeded; connection alive")
+                    except Exception:
+                        logger.warning(
+                            "Ping failed; triggering reconnect"
+                        )
+                        if self._ws is not None:
+                            await self._ws.close()
+                        break
 
     # -------------------------------------------------------------------
     # Reconnection with exponential backoff
