@@ -13,7 +13,7 @@
 | SimConnect Bridge | C# / .NET 8 (out-of-process exe, event-driven message pump) |
 | AI Inference | Anthropic Claude API with tool use |
 | Vector Store / RAG | ChromaDB with sentence-transformers embeddings |
-| Speech-to-Text | Whisper `small` model (local via Docker, onerahmet/openai-whisper-asr-webservice) |
+| Speech-to-Text | faster-whisper (CTranslate2) `medium` model via Docker |
 | Text-to-Speech | ElevenLabs streaming API (`eleven_multilingual_v2` model) |
 | IPC | WebSocket (JSON) between bridge and orchestrator |
 | Config | pydantic-settings with .env files |
@@ -34,6 +34,7 @@ airdale/
 │   │   ├── screen_capture.py    # Optional screen capture for vision analysis
 │   │   ├── sim_client.py        # WebSocket client, telemetry models, health monitor
 │   │   ├── tools.py             # Claude tool implementations
+│   │   ├── tts_preprocessor.py  # ICAO-compliant aviation text preprocessing for TTS
 │   │   ├── voice.py             # Voice I/O (PTT, VAD, barge-in, streaming TTS)
 │   │   └── whisper_client.py    # Whisper ASR HTTP client with retry logic
 │   ├── tests/                   # Unit tests (pytest + pytest-asyncio)
@@ -216,9 +217,19 @@ SIMCONNECT_WS_HOST=$(hostname).local       # WSL2 native
 
 15. **Query cache for ChromaDB** -- The `ContextStore` uses a TTL-based cache (60s default) keyed by query text, result count, and filter hash. Within a single flight phase, relevant documents rarely change, so this avoids redundant round-trips to ChromaDB.
 
+16. **faster-whisper over stock Whisper** -- CTranslate2 backend is 3-4x faster with identical accuracy. Uses the `medium` model for better recognition of aviation terminology.
+
+17. **Silero VAD over RMS threshold** -- Neural voice activity detection reduces silence timeout from 1.5s to 400ms, making voice interaction feel snappy without cutting off speech.
+
+18. **ElevenLabs WebSocket streaming** -- Single persistent WebSocket connection per response instead of per-sentence REST calls. Eliminates connection overhead and enables lower time-to-first-byte for TTS audio.
+
+19. **TTS phrase caching** -- Common responses (e.g., "Roger.", "Copy that.") are pre-generated at startup and served from an in-memory cache for zero-latency playback.
+
+20. **Aviation TTS preprocessor** -- Converts LLM output into speakable text following ICAO phraseology: digit-by-digit pronunciation for flight levels, headings, frequencies, runway designators, and squawk codes.
+
 ## Testing Approach
 
-- **287 tests passing** across Python and C# test suites.
+- **351 tests passing** across Python and C# test suites.
 - **Python:** pytest + pytest-asyncio for async tests. Mock the WebSocket connection and Claude API in unit tests.
 - **C#:** xUnit. Mock SimConnect for unit tests. Integration tests require MSFS running.
 - **No sim required for most tests** -- Record telemetry snapshots as JSON fixtures and replay them through the orchestrator.

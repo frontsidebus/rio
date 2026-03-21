@@ -1,4 +1,4 @@
-# MERLIN v1.0 -- Architecture Documentation
+# MERLIN v1.1 -- Architecture Documentation
 
 Technical deep-dive into MERLIN's system design, component responsibilities, data flows, and implementation decisions.
 
@@ -35,8 +35,15 @@ Technical deep-dive into MERLIN's system design, component responsibilities, dat
 |   +----------------+    +------------------+    +--------------+                  |
 |   |  Audio          |    |  Whisper Client  |    |  Voice I/O   |                  |
 |   |  Preprocessing  |    |  (HTTP, retry)   |    |  PTT / VAD   |                  |
-|   |  Hi-pass/norm   |    |  Aviation vocab  |    |  Barge-in    |                  |
+|   |  Hi-pass/norm   |    |  Aviation vocab  |    |  Silero VAD  |                  |
+|   |  Silero VAD     |    |  Conn pooling    |    |  Barge-in    |                  |
 |   +----------------+    +------------------+    +--------------+                  |
+|                                                                                   |
+|   +----------------+                                                              |
+|   |  TTS           |                                                              |
+|   |  Preprocessor  |                                                              |
+|   |  ICAO phrases  |                                                              |
+|   +----------------+                                                              |
 |                                                                                   |
 |   +----------------+    +------------------+    +--------------+                  |
 |   |  Context Store  |    |  Tool Functions  |    |  Screen      |                  |
@@ -51,11 +58,11 @@ Technical deep-dive into MERLIN's system design, component responsibilities, dat
               +--------------+--+              +---------+--------+
               |                 |              |                  |
        +------+------+  +------+------+  +----+------+   +------+------+
-       |  Whisper    |  |  ElevenLabs |  |  ChromaDB |   |  Aviation   |
-       |  ASR Server |  |  TTS API    |  |  (Docker) |   |  API (FAA)  |
-       |  (Docker)   |  |  (Cloud)    |  |  Port 8000|   |  (HTTP)     |
-       |  Port 9090  |  |  v2 model   |  +-----------+   +-------------+
-       +-------------+  +-------------+
+       |  faster-   |  |  ElevenLabs |  |  ChromaDB |   |  Aviation   |
+       |  whisper   |  |  TTS API    |  |  (Docker) |   |  API (FAA)  |
+       |  (Docker)  |  |  WS stream  |  |  Port 8000|   |  (HTTP)     |
+       |  Port 9090 |  |  v2 model   |  +-----------+   +-------------+
+       +------------+  +-------------+
               ^                 |
               |                 v
 +-----------------------------------------------------------------------------------+
@@ -102,14 +109,16 @@ MSFS 2024
 Browser microphone
   -> MediaRecorder (WebM/Opus)
   -> WebSocket binary frame to FastAPI server
-  -> convert_webm_to_wav_normalized() via ffmpeg
+  -> Send WebM direct (skip ffmpeg conversion)
+  -> Silero VAD (neural voice activity detection, 400ms silence timeout)
   -> Audio preprocessing pipeline:
        1. High-pass filter (remove low-frequency noise)
        2. Silence trimming (strip leading/trailing dead air)
        3. Amplitude normalization (consistent input levels)
-  -> POST to Whisper HTTP API (localhost:9090/asr)
-       Model: small
+  -> POST to faster-whisper HTTP API (localhost:9090/v1/audio/transcriptions)
+       Model: medium (CTranslate2 backend, 3-4x faster than stock Whisper)
        initial_prompt: aviation vocabulary (ATIS, METAR, squawk, NATO phonetic, ...)
+       Connection pooling via shared httpx.AsyncClient
        Note: the standalone WhisperClient retries with exponential backoff;
        the web server's transcription path does not retry
   -> TranscriptionResult (text, confidence, language, duration)
@@ -118,10 +127,12 @@ Browser microphone
        2. Dynamic token budget: 1024 (routine) or 2048 (briefings/checklists)
        3. Stream response from Claude API
        4. Execute tool calls in agentic loop if needed
+  -> Aviation TTS preprocessor (ICAO digit pronunciation, flight levels,
+       headings, frequencies, runway designators, squawk codes)
   -> TTS text sanitizer strips markdown/special characters
-  -> POST to ElevenLabs API (eleven_multilingual_v2 model)
-  -> Audio bytes (MP3) returned
-  -> WebSocket binary frame to browser
+  -> ElevenLabs WebSocket streaming (persistent connection per response)
+       TLS pre-warm at startup; phrase cache for common responses
+  -> Audio bytes streamed via WebSocket to browser
   -> Browser AudioContext plays audio
 
 Barge-in: new user input cancels in-flight Claude stream + TTS immediately
@@ -152,9 +163,10 @@ Barge-in: new user input cancels in-flight Claude stream + TTS immediately
 | `claude_client.py` | Anthropic API wrapper; MERLIN persona (from `data/prompts/merlin_system.md`); flight-phase-aware response style directives; response pacing rules; streaming with tool dispatch |
 | `flight_phase.py` | `FlightPhaseDetector` state machine with configurable `PhaseThresholds`; hysteresis (3 consecutive detections before transition) |
 | `context_store.py` | ChromaDB RAG store; document ingestion with chunking; phase-aware topic mapping; `_QueryCache` with 60s TTL to avoid redundant ChromaDB round-trips |
-| `audio_processing.py` | Audio preprocessing: high-pass filter, silence trimming, normalization; `AVIATION_PROMPT` vocabulary for Whisper biasing; WebM-to-WAV conversion |
+| `audio_processing.py` | Audio preprocessing: high-pass filter, silence trimming, normalization; Silero VAD (neural voice activity detection, 400ms silence timeout); `AVIATION_PROMPT` vocabulary for Whisper biasing; WebM-to-WAV conversion |
 | `voice.py` | `VoiceInput` (PTT and VAD modes); `VoiceOutput` (streaming TTS with sentence buffering); barge-in cancellation support |
-| `whisper_client.py` | HTTP client for Whisper ASR service; `TranscriptionResult` dataclass; retry with exponential backoff; confidence scoring |
+| `tts_preprocessor.py` | ICAO-compliant aviation text preprocessing for TTS: digit-by-digit pronunciation for flight levels, headings, frequencies, runway designators, squawk codes |
+| `whisper_client.py` | HTTP client for faster-whisper ASR service (OpenAI-compatible `/v1/audio/transcriptions` endpoint); `TranscriptionResult` dataclass; retry with exponential backoff; confidence scoring |
 | `tools.py` | Claude tool implementations: `get_sim_state`, `lookup_airport`, `search_manual`, `get_checklist`, `create_flight_plan` |
 | `screen_capture.py` | Optional screen capture for vision-based analysis |
 | `main.py` | CLI entry point for headless/console operation |
@@ -241,8 +253,9 @@ Barge-in: new user input cancels in-flight Claude stream + TTS immediately
 |  Docker Network: merlin (bridge)                  |
 |                                                    |
 |   +-----------+   +-----------+   +------------+  |
-|   |  whisper  |   | chromadb  |   |orchestrator|  |
-|   |  :9090    |   |  :8000    |   |   :3838    |  |
+|   | faster-  |   | chromadb  |   |orchestrator|  |
+|   | whisper  |   |  :8000    |   |   :3838    |  |
+|   |  :9090   |   |           |   |            |  |
 |   +-----------+   +-----------+   +------------+  |
 |                                          |         |
 +------------------------------------------|--------+
@@ -273,7 +286,7 @@ Barge-in: new user input cancels in-flight Claude stream + TTS immediately
 
 | Volume | Type | Mount Point | Purpose |
 |---|---|---|---|
-| `whisper_cache` | Named volume | `/root/.cache/whisper` | Caches downloaded Whisper models across container restarts |
+| `whisper_cache` | Named volume | `/root/.cache/huggingface` | Caches downloaded faster-whisper models across container restarts |
 | `./data/chroma_db` | Bind mount | `/chroma/chroma` | ChromaDB persistent storage; survives `docker compose down` |
 
 The orchestrator container does not mount persistent data by default. In dev mode, the source code is bind-mounted read-only for hot-reload:
@@ -302,4 +315,4 @@ Prerequisites:
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed
 - Docker Desktop configured to use the NVIDIA runtime
 
-This dramatically reduces Whisper transcription latency, especially with the `small` model.
+This dramatically reduces Whisper transcription latency, especially with the `medium` model.
