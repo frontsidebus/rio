@@ -21,6 +21,7 @@ ok()   { echo -e "${GREEN}[  OK  ]${NC} $1"; }
 warn() { echo -e "${YELLOW}[ WARN ]${NC} $1"; }
 
 cd "$PROJECT_ROOT"
+mkdir -p "$PROJECT_ROOT/logs"
 
 # --- 1. Docker services (Whisper + ChromaDB) --------------------------------
 log "Starting Docker services..."
@@ -76,7 +77,6 @@ lsof -ti :3838 2>/dev/null | xargs -r kill -9 2>/dev/null || true
 sleep 1
 
 # Activate venv and start
-mkdir -p "$PROJECT_ROOT/logs"
 cd "$PROJECT_ROOT/web"
 source "$PROJECT_ROOT/orchestrator/.venv/bin/activate"
 python run.py > "$PROJECT_ROOT/logs/web.log" 2>&1 &
@@ -98,7 +98,7 @@ done
 # --- Summary ----------------------------------------------------------------
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  MERLIN AI Co-Pilot v1.0 — All Systems Go${NC}"
+echo -e "${CYAN}  MERLIN AI Co-Pilot v1.1 — All Systems Go${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
 echo ""
 

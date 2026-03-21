@@ -17,6 +17,11 @@ if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" (
     exit /b
 )
 
+if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
+    start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --app=%MERLIN_URL% --window-size=1400,900
+    exit /b
+)
+
 if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
     start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=%MERLIN_URL% --window-size=1400,900
     exit /b

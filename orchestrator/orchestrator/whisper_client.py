@@ -1,15 +1,17 @@
-"""Client for the local Whisper speech-to-text HTTP service.
+"""Client for the local faster-whisper speech-to-text HTTP service.
 
-Communicates with a Whisper ASR server (onerahmet/openai-whisper-asr-webservice)
+Communicates with a faster-whisper-server (fedirz/faster-whisper-server)
 to transcribe audio without sending data to any external API.
+The server exposes an OpenAI-compatible /v1/audio/transcriptions endpoint.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -21,12 +23,10 @@ OutputFormat = Literal["text", "json", "verbose_json", "srt", "vtt"]
 
 # Defaults
 _DEFAULT_WHISPER_URL = "http://localhost:9090"
+_DEFAULT_MODEL = "medium"
 _DEFAULT_TIMEOUT = 30.0
 _MAX_RETRIES = 3
 _RETRY_BACKOFF = 1.5  # seconds, multiplied by attempt number
-
-# Confidence threshold below which a transcription is considered unreliable
-_LOW_CONFIDENCE_THRESHOLD = 0.4
 
 
 @dataclass
@@ -44,11 +44,12 @@ class WhisperClientError(Exception):
 
 
 class WhisperClient:
-    """HTTP client for a local Whisper ASR service.
+    """HTTP client for a local faster-whisper-server.
 
     Args:
         base_url: Root URL of the Whisper service (e.g. http://whisper:9090).
         timeout: Request timeout in seconds.
+        model: Whisper model name (e.g. "medium", "large-v3").
         language: Optional language hint (ISO 639-1 code, e.g. "en").
         initial_prompt: Optional prompt to bias recognition toward specific vocabulary.
     """
@@ -57,14 +58,37 @@ class WhisperClient:
         self,
         base_url: str = _DEFAULT_WHISPER_URL,
         timeout: float = _DEFAULT_TIMEOUT,
+        model: str = _DEFAULT_MODEL,
         language: str | None = "en",
         initial_prompt: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.model = model
         self.language = language
         self.initial_prompt = initial_prompt or AVIATION_PROMPT
         self._client = httpx.Client(timeout=self.timeout)
+
+    # -- Internal helpers -----------------------------------------------------
+
+    def _build_form_data(
+        self,
+        audio_bytes: bytes,
+        response_format: str,
+        language: str | None,
+    ) -> tuple[dict[str, str], dict[str, tuple[str, bytes, str]]]:
+        """Build multipart form fields and files for /v1/audio/transcriptions."""
+        data: dict[str, str] = {
+            "model": self.model,
+            "response_format": response_format,
+        }
+        if language:
+            data["language"] = language
+        if self.initial_prompt:
+            data["prompt"] = self.initial_prompt
+
+        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+        return data, files
 
     # -- Public API -----------------------------------------------------------
 
@@ -89,23 +113,13 @@ class WhisperClient:
             WhisperClientError: If transcription fails after all retries.
         """
         lang = language or self.language
-        params: dict[str, str] = {
-            "output": output_format,
-            "task": "transcribe",
-            "encode": "true",
-        }
-        if lang:
-            params["language"] = lang
-        if self.initial_prompt:
-            params["initial_prompt"] = self.initial_prompt
-
-        url = f"{self.base_url}/asr"
-        files = {"audio_file": ("audio.wav", audio_bytes, "audio/wav")}
+        url = f"{self.base_url}/v1/audio/transcriptions"
+        data, files = self._build_form_data(audio_bytes, output_format, lang)
 
         last_error: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                response = self._client.post(url, params=params, files=files)
+                response = self._client.post(url, data=data, files=files)
                 response.raise_for_status()
                 result = response.text.strip()
                 logger.debug("Whisper transcription (%d chars): %s...", len(result), result[:80])
@@ -155,8 +169,9 @@ class WhisperClient:
     ) -> TranscriptionResult:
         """Transcribe audio and return result with confidence scoring.
 
-        Uses verbose_json output to extract per-segment confidence (avg_logprob).
-        Falls back to a default confidence of 0.5 if metadata is unavailable.
+        Uses verbose_json response_format to extract per-segment confidence
+        (avg_logprob). Falls back to a default confidence of 0.5 if metadata
+        is unavailable.
 
         Args:
             audio_bytes: Raw audio data (WAV, MP3, FLAC, etc.).
@@ -169,26 +184,16 @@ class WhisperClient:
             WhisperClientError: If transcription fails after all retries.
         """
         lang = language or self.language
-        params: dict[str, str] = {
-            "output": "verbose_json",
-            "task": "transcribe",
-            "encode": "true",
-        }
-        if lang:
-            params["language"] = lang
-        if self.initial_prompt:
-            params["initial_prompt"] = self.initial_prompt
-
-        url = f"{self.base_url}/asr"
-        files = {"audio_file": ("audio.wav", audio_bytes, "audio/wav")}
+        url = f"{self.base_url}/v1/audio/transcriptions"
+        data, files = self._build_form_data(audio_bytes, "verbose_json", lang)
 
         last_error: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                response = self._client.post(url, params=params, files=files)
+                response = self._client.post(url, data=data, files=files)
                 response.raise_for_status()
-                data = response.json()
-                return self._parse_verbose_response(data)
+                resp_data = response.json()
+                return self._parse_verbose_response(resp_data)
             except httpx.ConnectError as exc:
                 last_error = exc
                 wait = _RETRY_BACKOFF * attempt
@@ -225,7 +230,7 @@ class WhisperClient:
         msg = f"Whisper transcription failed after {_MAX_RETRIES} attempts"
         raise WhisperClientError(msg) from last_error
 
-    def _parse_verbose_response(self, data: dict) -> TranscriptionResult:
+    def _parse_verbose_response(self, data: dict[str, Any]) -> TranscriptionResult:
         """Extract text, confidence, language, and duration from verbose_json response."""
         text = data.get("text", "").strip()
         detected_lang = data.get("language", self.language or "en")
@@ -236,8 +241,6 @@ class WhisperClient:
         # We map it to 0..1 using: confidence = exp(avg_logprob).
         segments = data.get("segments", [])
         if segments:
-            import math
-
             logprobs = [s.get("avg_logprob", -1.0) for s in segments]
             avg_logprob = sum(logprobs) / len(logprobs)
             # exp(-1.0) ~ 0.37, exp(-0.2) ~ 0.82, exp(0) = 1.0
@@ -263,7 +266,7 @@ class WhisperClient:
     def is_available(self) -> bool:
         """Check whether the Whisper service is reachable."""
         try:
-            resp = self._client.get(f"{self.base_url}/docs", timeout=5.0)
+            resp = self._client.get(f"{self.base_url}/health", timeout=5.0)
             return resp.status_code == 200
         except httpx.HTTPError:
             return False

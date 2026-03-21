@@ -25,26 +25,26 @@
       </div>
       <div class="header-right">
         <!-- Connection quality indicator -->
-        <div class="conn-quality-indicator" id="conn-quality-group">
-          <span class="conn-quality-led conn-offline" id="conn-quality"></span>
+        <div class="conn-quality-indicator" id="conn-quality-group" role="status" aria-label="Connection quality">
+          <span class="conn-quality-led conn-offline" id="conn-quality" aria-hidden="true"></span>
           <span class="conn-quality-label" id="conn-quality-text">OFFLINE</span>
         </div>
         <div class="header-divider"></div>
-        <div class="status-led-group">
-          <div class="status-indicator" id="status-simconnect">
-            <span class="led led-red"></span>
+        <div class="status-led-group" role="group" aria-label="Subsystem status indicators">
+          <div class="status-indicator" id="status-simconnect" role="status" aria-label="SimConnect status">
+            <span class="led led-red" aria-hidden="true"></span>
             <span class="status-label">SIM</span>
           </div>
-          <div class="status-indicator" id="status-whisper">
-            <span class="led led-red"></span>
+          <div class="status-indicator" id="status-whisper" role="status" aria-label="Speech-to-text status">
+            <span class="led led-red" aria-hidden="true"></span>
             <span class="status-label">STT</span>
           </div>
-          <div class="status-indicator" id="status-chromadb">
-            <span class="led led-red"></span>
+          <div class="status-indicator" id="status-chromadb" role="status" aria-label="Database status">
+            <span class="led led-red" aria-hidden="true"></span>
             <span class="status-label">DB</span>
           </div>
-          <div class="status-indicator" id="status-claude">
-            <span class="led led-red"></span>
+          <div class="status-indicator" id="status-claude" role="status" aria-label="LLM status">
+            <span class="led led-red" aria-hidden="true"></span>
             <span class="status-label">LLM</span>
           </div>
         </div>
@@ -71,10 +71,10 @@
           <span class="terminal-led" id="chat-led"></span>
         </div>
         <div class="terminal-content" id="chat-content">
-          <div class="chat-messages" id="chat-messages"></div>
+          <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Chat messages"></div>
         </div>
         <div class="chat-input-row">
-          <input type="text" id="chat-input" placeholder="Enter command... (SPACE = push-to-talk)" autocomplete="off" spellcheck="false">
+          <input type="text" id="chat-input" placeholder="Enter command... (SPACE = push-to-talk)" autocomplete="off" spellcheck="false" aria-label="Chat input">
         </div>
       </section>
     </main>
@@ -90,14 +90,14 @@
           <span class="ptt-label">PUSH TO TALK</span>
         </button>
         <div class="waveform-container">
-          <canvas id="waveform-canvas" width="400" height="60"></canvas>
+          <canvas id="waveform-canvas" width="400" height="60" aria-label="Audio waveform visualization" role="img"></canvas>
         </div>
-        <div class="voice-status" id="voice-status">
+        <div class="voice-status" id="voice-status" role="status" aria-live="polite">
           <span class="voice-status-text">IDLE</span>
         </div>
         <div class="volume-control">
           <label class="volume-label" for="tts-volume">VOL</label>
-          <input type="range" id="tts-volume" class="volume-slider" min="0" max="1" step="0.05" value="0.8">
+          <input type="range" id="tts-volume" class="volume-slider" min="0" max="1" step="0.05" value="0.8" aria-label="TTS volume">
         </div>
       </div>
     </footer>

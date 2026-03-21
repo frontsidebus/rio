@@ -185,6 +185,117 @@ def preprocess_audio(
     return samples
 
 
+class SileroVAD:
+    """Neural voice activity detection using Silero VAD model.
+
+    Lazily loads the Silero ONNX model on first use and caches it for subsequent
+    calls. Falls back gracefully if torch or onnxruntime are not installed.
+    """
+
+    def __init__(self, threshold: float = 0.5, silence_ms: int = 400) -> None:
+        self._threshold = threshold
+        self._silence_ms = silence_ms
+        self._model: object | None = None
+        self._available: bool | None = None
+        self._silence_frame_count: int = 0
+        self._speech_active: bool = False
+
+    @property
+    def available(self) -> bool:
+        """Whether the Silero VAD model can be loaded."""
+        if self._available is None:
+            try:
+                import torch  # noqa: F401
+
+                self._available = True
+            except ImportError:
+                self._available = False
+                logger.warning(
+                    "torch not installed -- Silero VAD unavailable, "
+                    "falling back to RMS-based detection"
+                )
+        return self._available
+
+    def _load_model(self) -> None:
+        """Load the Silero VAD ONNX model via torch.hub (cached after first download)."""
+        import torch
+
+        model, utils = torch.hub.load(
+            "snakers4/silero-vad", "silero_vad", onnx=True
+        )
+        self._model = model
+        # utils returns (get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks)
+        self._get_speech_timestamps = utils[0]
+        logger.info("Silero VAD model loaded successfully")
+
+    def speech_probability(
+        self, audio_chunk: np.ndarray, sample_rate: int = 16000
+    ) -> float:
+        """Return speech probability (0.0-1.0) for an audio chunk.
+
+        Args:
+            audio_chunk: Float32 audio samples, typically a short frame (30-100ms).
+            sample_rate: Sample rate in Hz (must be 8000 or 16000 for Silero).
+
+        Returns:
+            Speech probability between 0.0 and 1.0.
+        """
+        if not self.available:
+            return -1.0
+
+        if self._model is None:
+            self._load_model()
+
+        import torch
+
+        tensor = torch.FloatTensor(audio_chunk)
+        return float(self._model(tensor, sample_rate).item())
+
+    def detect_speech_end(
+        self,
+        audio_chunk: np.ndarray,
+        sample_rate: int = 16000,
+        chunk_duration_ms: int = 64,
+    ) -> bool:
+        """Detect whether speech has ended based on accumulated silence.
+
+        Call this once per audio chunk in a streaming fashion. It tracks internal
+        state across calls -- when speech is detected followed by enough silence
+        (controlled by ``silence_ms``), it returns True.
+
+        Args:
+            audio_chunk: Float32 audio chunk to evaluate.
+            sample_rate: Sample rate in Hz.
+            chunk_duration_ms: Duration of this chunk in milliseconds.
+
+        Returns:
+            True if speech was detected and has now ended (silence exceeded threshold).
+        """
+        prob = self.speech_probability(audio_chunk, sample_rate)
+        if prob < 0:
+            return False  # model not available
+
+        if prob >= self._threshold:
+            self._speech_active = True
+            self._silence_frame_count = 0
+            return False
+
+        if self._speech_active:
+            self._silence_frame_count += 1
+            accumulated_silence_ms = self._silence_frame_count * chunk_duration_ms
+            if accumulated_silence_ms >= self._silence_ms:
+                return True
+
+        return False
+
+    def reset(self) -> None:
+        """Reset endpoint-detection state for a new utterance."""
+        self._silence_frame_count = 0
+        self._speech_active = False
+        if self._model is not None:
+            self._model.reset_states()
+
+
 def samples_to_wav_bytes(
     samples: np.ndarray,
     sample_rate: int = TARGET_SAMPLE_RATE,

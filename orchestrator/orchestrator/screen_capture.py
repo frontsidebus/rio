@@ -34,6 +34,10 @@ class CaptureManager:
     def enabled(self) -> bool:
         return self._enabled
 
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = value
+
     @property
     def latest_frame(self) -> str | None:
         return self._latest_frame
@@ -80,21 +84,18 @@ class CaptureManager:
         """Capture a single frame immediately and return as base64 JPEG."""
         if not self._enabled:
             return None
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._grab_frame)
 
     async def _capture_loop(self) -> None:
         interval = 1.0 / self._fps
-        loop = asyncio.get_event_loop()
-        try:
-            while self._running:
-                frame = await loop.run_in_executor(None, self._grab_frame)
-                if frame:
-                    self._latest_frame = frame
-                    self._latest_timestamp = time.time()
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            raise
+        loop = asyncio.get_running_loop()
+        while self._running:
+            frame = await loop.run_in_executor(None, self._grab_frame)
+            if frame:
+                self._latest_frame = frame
+                self._latest_timestamp = time.time()
+            await asyncio.sleep(interval)
 
     def _grab_frame(self) -> str | None:
         """Grab a screenshot, resize to 720p, and encode as base64 JPEG."""

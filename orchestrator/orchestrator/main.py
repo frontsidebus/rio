@@ -12,6 +12,8 @@ import logging
 import signal
 from typing import Any
 
+import httpx
+
 from .claude_client import ClaudeClient
 from .config import Settings, load_settings
 from .context_store import ContextStore
@@ -166,13 +168,11 @@ class Orchestrator:
     async def _check_whisper_health(self) -> None:
         """Probe Whisper endpoint and update health status."""
         try:
-            import aiohttp
-
-            async with aiohttp.ClientSession() as session, session.get(
-                f"{self._settings.whisper_url}/docs",
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as resp:
-                if resp.status == 200:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{self._settings.whisper_url}/docs"
+                )
+                if resp.status_code == 200:
                     self._whisper_available = True
                     self._health.update(
                         "whisper", True, "Responding"
@@ -182,7 +182,7 @@ class Orchestrator:
                     self._health.update(
                         "whisper",
                         False,
-                        f"HTTP {resp.status}; voice input degraded",
+                        f"HTTP {resp.status_code}; voice input degraded",
                     )
         except Exception as exc:
             self._whisper_available = False
@@ -262,7 +262,7 @@ class Orchestrator:
                 else:
                     try:
                         user_text = (
-                            await asyncio.get_event_loop().run_in_executor(
+                            await asyncio.get_running_loop().run_in_executor(
                                 None, lambda: input("Captain> ")
                             )
                         )
@@ -320,9 +320,10 @@ class Orchestrator:
 
                 # TTS output (non-blocking)
                 if self._tts_enabled and full_response:
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._voice_output.speak(full_response)
                     )
+                    task.add_done_callback(self._on_tts_done)
 
             except KeyboardInterrupt:
                 print("\nUse /quit to exit.")
@@ -332,6 +333,15 @@ class Orchestrator:
                     "\n[MERLIN encountered an error. "
                     "Check logs for details.]"
                 )
+
+    @staticmethod
+    def _on_tts_done(task: asyncio.Task[None]) -> None:
+        """Log exceptions from fire-and-forget TTS tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("TTS playback task failed: %s", exc)
 
     def _get_current_sim_state(self) -> SimState:
         """Return the latest sim state, or a default empty state."""
@@ -379,9 +389,10 @@ class Orchestrator:
         if cmd == "/capture":
             if self._capture_manager.enabled:
                 await self._capture_manager.stop()
+                self._capture_manager.enabled = False
                 print("Screen capture disabled.")
             else:
-                self._capture_manager._enabled = True
+                self._capture_manager.enabled = True
                 await self._capture_manager.start()
                 print("Screen capture enabled.")
             return True
@@ -480,7 +491,7 @@ async def async_main() -> None:
 
     orchestrator = Orchestrator(settings, text_only=args.text_only)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(

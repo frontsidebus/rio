@@ -36,7 +36,9 @@ MERLIN is a voice-interactive AI co-pilot powered by [Claude](https://www.anthro
 ## Features
 
 - **Live telemetry** -- airspeed, altitude, attitude, engine params, and control surfaces streamed in real time
-- **Voice input/output** -- Whisper STT with aviation vocabulary prompting and ElevenLabs streaming TTS
+- **Voice input/output** -- Whisper STT with aviation vocabulary prompting and ElevenLabs WebSocket streaming TTS
+- **Silero VAD** -- optional neural voice activity detection for low-latency speech endpoint detection
+- **ICAO-compliant aviation number pronunciation** -- automatic conversion of flight levels, headings, frequencies, and squawk codes to standard phraseology for TTS
 - **AI co-pilot with flight-phase awareness** -- automatic phase detection (preflight through rollout) drives checklists and proactive callouts
 - **Barge-in interruption** -- speak or type while MERLIN is responding to cancel and redirect
 - **Push-to-talk and VAD modes** -- toggle between voice activation and manual push-to-talk
@@ -70,7 +72,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-This launches Whisper (STT), ChromaDB (RAG), and the web server. First startup downloads the Whisper `small` model -- allow a few minutes.
+This launches Whisper (STT), ChromaDB (RAG), and the web server. The Whisper service uses the `fedirz/faster-whisper-server` image. First startup downloads the Whisper model from HuggingFace (~1.5 GB for the default `medium` model) -- allow a few minutes.
 
 ### 3. Start the SimConnect bridge (Windows)
 
@@ -97,7 +99,7 @@ Navigate to [http://localhost:3838](http://localhost:3838) in your browser. MERL
 | SimConnect Bridge | C# / .NET 8 (out-of-process) |
 | Web Server | Python 3.11+ / FastAPI |
 | AI Inference | Anthropic Claude API with tool use |
-| Speech-to-Text | Whisper (local, via Docker) |
+| Speech-to-Text | faster-whisper (CTranslate2) via Docker |
 | Text-to-Speech | ElevenLabs streaming API |
 | Vector Store / RAG | ChromaDB with sentence-transformers |
 | IPC | WebSocket (JSON) |
@@ -133,6 +135,7 @@ airdale/
 ├── docker-compose.yml      # Whisper, ChromaDB, orchestrator services
 ├── .env.example            # Environment variable template
 └── docs/
+    ├── ARCHITECTURE.md     # System architecture deep-dive
     └── INSTALL.md          # Detailed installation guide
 ```
 
@@ -141,6 +144,7 @@ airdale/
 ## Documentation
 
 - [Installation Guide](docs/INSTALL.md) -- full setup walkthrough with troubleshooting
+- [Architecture](docs/ARCHITECTURE.md) -- system design, data flows, and component descriptions
 - [Project Conventions](CLAUDE.md) -- architecture decisions, code style, development commands
 
 ---

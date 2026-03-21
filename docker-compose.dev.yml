@@ -11,7 +11,7 @@ services:
   whisper:
     environment:
       # Use the tiny model for faster startup during development
-      - ASR_MODEL=tiny
+      - WHISPER__MODEL=tiny
 
   chromadb:
     environment:

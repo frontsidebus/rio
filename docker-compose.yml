@@ -12,33 +12,35 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # Whisper - Local speech-to-text via HTTP API
-  # Provides an OpenAI-compatible /asr endpoint for transcription.
+  # Whisper - Local speech-to-text via faster-whisper HTTP API
+  # Provides an OpenAI-compatible /v1/audio/transcriptions endpoint.
   # ---------------------------------------------------------------------------
   whisper:
-    image: onerahmet/openai-whisper-asr-webservice:latest
+    image: fedirz/faster-whisper-server:latest-cpu
     container_name: merlin-whisper
     ports:
-      - "9090:9000"
+      - "9090:8000"
     environment:
-      - ASR_MODEL=${WHISPER_MODEL:-medium}
-      - ASR_ENGINE=openai_whisper
+      - WHISPER__MODEL=${WHISPER_MODEL:-medium}
+      - WHISPER__INFERENCE_DEVICE=cpu
     volumes:
-      - whisper_cache:/root/.cache/whisper
+      - whisper_cache:/root/.cache/huggingface
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     networks:
       - merlin
     # -------------------------------------------------------------------------
-    # GPU acceleration (NVIDIA). Uncomment the block below if you have an
-    # NVIDIA GPU and the nvidia-container-toolkit installed.
+    # GPU acceleration (NVIDIA). Uncomment the lines below and comment out
+    # the CPU image above if you have an NVIDIA GPU and nvidia-container-toolkit.
     # See: https://docs.docker.com/compose/gpu-support/
     # -------------------------------------------------------------------------
+    # Uncomment for GPU acceleration (requires nvidia-container-toolkit):
+    # image: fedirz/faster-whisper-server:latest-cuda
     # deploy:
     #   resources:
     #     reservations:
@@ -63,7 +65,11 @@ services:
       - ./data/chroma_db:/chroma/chroma
     restart: unless-stopped
     healthcheck:
-      disable: true
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - merlin
 
@@ -77,16 +83,16 @@ services:
       dockerfile: Dockerfile
     container_name: merlin-orchestrator
     ports:
-      - "8081:8081"
+      - "3838:3838"
     depends_on:
       whisper:
         condition: service_healthy
       chromadb:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env
     environment:
-      - WHISPER_URL=http://whisper:9000
+      - WHISPER_URL=http://whisper:8000
       - CHROMADB_URL=http://chromadb:8000
       # The SimConnect bridge runs on the Windows host. In Docker Desktop for
       # Windows, host.docker.internal resolves to the host machine.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "merlin-orchestrator"
-version = "1.0.0"
+version = "1.1.0"
 description = "MERLIN - AI co-pilot orchestration layer for Microsoft Flight Simulator 2024"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,6 +26,10 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+]
+vad = [
+    "torch>=2.0",
+    "onnxruntime>=1.16",
 ]
 test = [
     "pytest>=8.0",

@@ -1,4 +1,4 @@
-"""Tests for orchestrator.whisper_client -- Whisper HTTP client with retry logic."""
+"""Tests for orchestrator.whisper_client -- faster-whisper HTTP client with retry logic."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from orchestrator.whisper_client import (
     TranscriptionResult,
     WhisperClient,
     WhisperClientError,
+    _DEFAULT_MODEL,
     _DEFAULT_WHISPER_URL,
     _MAX_RETRIES,
     _RETRY_BACKOFF,
@@ -69,6 +70,14 @@ class TestWhisperClientInit:
         c = WhisperClient(initial_prompt="custom terms")
         assert c.initial_prompt == "custom terms"
 
+    def test_default_model(self) -> None:
+        c = WhisperClient()
+        assert c.model == _DEFAULT_MODEL
+
+    def test_custom_model(self) -> None:
+        c = WhisperClient(model="large-v3")
+        assert c.model == "large-v3"
+
 
 # ---------------------------------------------------------------------------
 # Successful transcription
@@ -89,7 +98,7 @@ class TestTranscribeSuccess:
         result = whisper_client.transcribe(sample_audio)
         assert result == "Hello, Captain."
 
-    def test_sends_correct_params(
+    def test_sends_correct_endpoint_and_form_data(
         self, whisper_client: WhisperClient, sample_audio: bytes
     ) -> None:
         mock_response = MagicMock(spec=httpx.Response)
@@ -102,14 +111,15 @@ class TestTranscribeSuccess:
         whisper_client.transcribe(sample_audio, output_format="json", language="fr")
 
         call_args = whisper_client._client.post.call_args
-        assert call_args[0][0] == "http://localhost:9000/asr"
-        assert call_args[1]["params"]["output"] == "json"
-        assert call_args[1]["params"]["language"] == "fr"
+        assert call_args[0][0] == "http://localhost:9000/v1/audio/transcriptions"
+        assert call_args[1]["data"]["response_format"] == "json"
+        assert call_args[1]["data"]["language"] == "fr"
+        assert call_args[1]["data"]["model"] == _DEFAULT_MODEL
 
-    def test_sends_task_and_initial_prompt(
+    def test_sends_model_and_prompt(
         self, whisper_client: WhisperClient, sample_audio: bytes
     ) -> None:
-        """Verify that task=transcribe and initial_prompt are sent."""
+        """Verify that model and prompt are sent as form data."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.text = "text"
         mock_response.raise_for_status = MagicMock()
@@ -120,11 +130,10 @@ class TestTranscribeSuccess:
         whisper_client.transcribe(sample_audio)
 
         call_args = whisper_client._client.post.call_args
-        params = call_args[1]["params"]
-        assert params["task"] == "transcribe"
-        assert params["encode"] == "true"
-        assert "initial_prompt" in params
-        assert "ATIS" in params["initial_prompt"]
+        data = call_args[1]["data"]
+        assert data["model"] == _DEFAULT_MODEL
+        assert "prompt" in data
+        assert "ATIS" in data["prompt"]
 
     def test_uses_default_language_when_not_overridden(
         self, whisper_client: WhisperClient, sample_audio: bytes
@@ -138,9 +147,9 @@ class TestTranscribeSuccess:
 
         whisper_client.transcribe(sample_audio)
         call_args = whisper_client._client.post.call_args
-        assert call_args[1]["params"]["language"] == "en"
+        assert call_args[1]["data"]["language"] == "en"
 
-    def test_no_language_param_when_none(self, sample_audio: bytes) -> None:
+    def test_no_language_field_when_none(self, sample_audio: bytes) -> None:
         client = WhisperClient(language=None)
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.text = "text"
@@ -151,7 +160,28 @@ class TestTranscribeSuccess:
 
         client.transcribe(sample_audio)
         call_args = client._client.post.call_args
-        assert "language" not in call_args[1]["params"]
+        assert "language" not in call_args[1]["data"]
+
+    def test_file_upload_field(
+        self, whisper_client: WhisperClient, sample_audio: bytes
+    ) -> None:
+        """Verify audio is sent as a 'file' multipart upload."""
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.text = "text"
+        mock_response.raise_for_status = MagicMock()
+
+        whisper_client._client = MagicMock()
+        whisper_client._client.post.return_value = mock_response
+
+        whisper_client.transcribe(sample_audio)
+
+        call_args = whisper_client._client.post.call_args
+        files = call_args[1]["files"]
+        assert "file" in files
+        filename, content, mime = files["file"]
+        assert filename == "audio.wav"
+        assert content == sample_audio
+        assert mime == "audio/wav"
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +258,7 @@ class TestTranscribeWithConfidence:
         result = whisper_client.transcribe_with_confidence(sample_audio)
         assert result.confidence == 0.5
 
-    def test_sends_verbose_json_output_format(
+    def test_sends_verbose_json_response_format(
         self, whisper_client: WhisperClient, sample_audio: bytes
     ) -> None:
         verbose_response = {
@@ -247,7 +277,7 @@ class TestTranscribeWithConfidence:
         whisper_client.transcribe_with_confidence(sample_audio)
 
         call_args = whisper_client._client.post.call_args
-        assert call_args[1]["params"]["output"] == "verbose_json"
+        assert call_args[1]["data"]["response_format"] == "verbose_json"
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +491,7 @@ class TestIsAvailable:
 
         assert whisper_client.is_available() is True
         whisper_client._client.get.assert_called_once_with(
-            "http://localhost:9000/docs",
+            "http://localhost:9000/health",
             timeout=5.0,
         )
 

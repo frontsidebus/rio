@@ -37,7 +37,7 @@ def docker_whisper(request: pytest.FixtureRequest) -> Generator[str, None, None]
     Tears down after the test session completes.
     """
     service = "whisper"
-    url = "http://localhost:9000"
+    url = "http://localhost:9090"
 
     subprocess.run(_compose_cmd("up", "-d", service), check=True, capture_output=True)
     _wait_for_http(url + "/docs", timeout=120)
@@ -54,7 +54,7 @@ def docker_chromadb(request: pytest.FixtureRequest) -> Generator[str, None, None
     url = "http://localhost:8000"
 
     subprocess.run(_compose_cmd("up", "-d", service), check=True, capture_output=True)
-    _wait_for_http(url + "/api/v1/heartbeat", timeout=60)
+    _wait_for_http(url + "/api/v2/heartbeat", timeout=60)
 
     yield url
 

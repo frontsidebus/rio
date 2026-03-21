@@ -121,7 +121,7 @@ This starts:
 | ChromaDB | `merlin-chromadb` | 8000 | Vector store for RAG document retrieval |
 | Orchestrator | `merlin-orchestrator` | 3838 | Web server + MERLIN brain |
 
-**First startup downloads the Whisper `small` model (~500 MB).** This can take several minutes. Monitor progress:
+**First startup downloads the Whisper `medium` model (~1.5 GB) from HuggingFace.** This can take several minutes. Monitor progress:
 
 ```bash
 docker compose logs -f whisper
@@ -135,11 +135,11 @@ The model is cached in a Docker volume (`whisper_cache`), so subsequent starts a
 # Check all containers are running
 docker compose ps
 
-# Whisper health (should return HTML docs page)
-curl http://localhost:9090/docs
+# Whisper health (should return 200 OK)
+curl http://localhost:9090/health
 
 # ChromaDB health
-curl http://localhost:8000/api/v1/heartbeat
+curl http://localhost:8000/api/v2/heartbeat
 ```
 
 ### 7. Start the SimConnect Bridge
@@ -199,14 +199,29 @@ The Docker Compose file already configures the orchestrator container to use `ho
 - Confirm the DLL path in `SimConnectBridge.csproj` is correct.
 - The bridge must run as a native Windows process, not inside WSL or Docker.
 
-### Whisper Model Download Time
+### Whisper (faster-whisper via Docker)
 
-The default `small` model (~500 MB) downloads on first container start. Larger models (`medium`, `large-v3`) can exceed 3 GB.
+MERLIN uses the `fedirz/faster-whisper-server` Docker image, which provides an OpenAI-compatible transcription API backed by CTranslate2. The container listens on port 8000 internally, mapped to port 9090 on the host.
 
+- **Image:** `fedirz/faster-whisper-server:latest-cpu` (or `latest-cuda` for GPU)
+- **Healthcheck endpoint:** `/health`
+- **Model download:** On first startup, the model is downloaded from HuggingFace. The default `medium` model is ~1.5 GB. The model is cached in the `whisper_cache` Docker volume, so subsequent starts are fast.
 - Check download progress: `docker compose logs -f whisper`
-- The model is cached in the `whisper_cache` Docker volume -- subsequent starts are fast.
 - For faster development iteration, set `WHISPER_MODEL=tiny` in `.env` (~75 MB).
 - If behind a corporate proxy, configure Docker Desktop proxy settings under Settings > Resources > Proxies.
+
+**GPU support:** To use NVIDIA GPU acceleration, uncomment the CUDA variant in `docker-compose.yml`. This requires the [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) to be installed. Change the image to `fedirz/faster-whisper-server:latest-cuda` and uncomment the `deploy.resources.reservations.devices` section.
+
+### Silero VAD (Optional)
+
+MERLIN supports neural voice activity detection via Silero VAD for low-latency speech endpoint detection. This is optional and requires additional dependencies:
+
+```bash
+cd orchestrator
+pip install -e ".[vad]"
+```
+
+This installs `torch` and `onnxruntime`. Silero VAD loads its ONNX model lazily on first use and falls back gracefully if the dependencies are not installed.
 
 ### ChromaDB v2 API
 
@@ -218,7 +233,7 @@ Recent versions of ChromaDB have migrated to a v2 API. If you see errors related
   rm -rf data/chroma_db
   docker compose restart chromadb
   ```
-- The orchestrator uses the ChromaDB HTTP client. Verify the endpoint: `curl http://localhost:8000/api/v1/heartbeat`
+- The orchestrator uses the ChromaDB HTTP client. Verify the endpoint: `curl http://localhost:8000/api/v2/heartbeat`
 
 ### Bridge Connects but No Telemetry
 

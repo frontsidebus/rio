@@ -55,6 +55,6 @@ RUN chown -R merlin:merlin /app
 
 USER merlin
 
-EXPOSE 8081
+EXPOSE 3838
 
 ENTRYPOINT ["python", "-m", "orchestrator.main"]

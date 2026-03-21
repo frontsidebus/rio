@@ -51,6 +51,7 @@
     audioStream: null,
     audioContext: null,
     analyser: null,
+    micSource: null,
     audioChunks: [],
     isSpaceHeld: false,
     streamingMsgEl: null,
@@ -290,19 +291,19 @@
     flat.tas     = spd.true_airspeed != null ? Math.round(spd.true_airspeed) + ' kt' : '---';
     flat.gs      = spd.ground_speed != null ? Math.round(spd.ground_speed) + ' kt' : '---';
     flat.vs      = spd.vertical_speed != null ? Math.round(spd.vertical_speed) + ' fpm' : '---';
-    flat.heading = att.heading_magnetic != null ? Math.round(att.heading_magnetic) + '°' : '---';
+    flat.heading = att.heading_magnetic != null ? String(Math.round(att.heading_magnetic)).padStart(3, '0') + '°' : '---';
 
     flat.rpm       = e1.rpm != null ? Math.round(e1.rpm) : '---';
     flat.manifold  = e1.manifold_pressure != null ? e1.manifold_pressure.toFixed(1) + ' inHg' : '---';
     flat.fuel_flow = e1.fuel_flow_gph != null ? e1.fuel_flow_gph.toFixed(1) + ' gph' : '---';
-    flat.oil_temp  = e1.oil_temp != null ? Math.round(e1.oil_temp) + '°' : '---';
+    flat.oil_temp  = e1.oil_temp != null ? Math.round(e1.oil_temp) + '°C' : '---';
 
     flat.ap_status = ap.master ? 'ENGAGED' : 'OFF';
-    flat.ap_hdg    = ap.heading != null ? Math.round(ap.heading) + '°' : '---';
+    flat.ap_hdg    = ap.heading != null ? String(Math.round(ap.heading)).padStart(3, '0') + '°' : '---';
     flat.ap_alt    = ap.altitude != null ? Math.round(ap.altitude) + ' ft' : '---';
     flat.ap_vs     = ap.vertical_speed != null ? Math.round(ap.vertical_speed) + ' fpm' : '---';
 
-    flat.wind        = env.wind_speed_kts != null ? Math.round(env.wind_direction) + '°/' + Math.round(env.wind_speed_kts) + 'kt' : '---';
+    flat.wind        = env.wind_speed_kts != null ? String(Math.round(env.wind_direction)).padStart(3, '0') + '°/' + Math.round(env.wind_speed_kts) + 'kt' : '---';
     flat.visibility  = env.visibility_sm != null ? env.visibility_sm.toFixed(1) + ' sm' : '---';
     flat.temperature = env.temperature_c != null ? Math.round(env.temperature_c) + '°C' : '---';
     flat.qnh         = env.barometer_inhg != null ? env.barometer_inhg.toFixed(2) + ' inHg' : '---';
@@ -725,6 +726,19 @@
         // Marker before binary audio frame — handled by binary message listener
         break;
 
+      case 'listening':
+        // Server signals MERLIN is ready for input after finishing response
+        if (!state.isPlayingAudio && state.audioQueue.length === 0) {
+          setVoiceMode('idle');
+        }
+        break;
+
+      case 'interrupted':
+        // Server confirms the active response was cancelled (barge-in)
+        finishStreamingMessage();
+        removeThinkingIndicator();
+        break;
+
       case 'error':
         removeThinkingIndicator();
         finishStreamingMessage();
@@ -790,7 +804,7 @@
     const txt = dom.voiceStatusText;
 
     btn.classList.remove('recording', 'processing', 'speaking', 'thinking');
-    txt.classList.remove('recording', 'processing', 'speaking', 'thinking');
+    txt.classList.remove('recording', 'processing', 'speaking', 'thinking', 'speech-detected');
 
     switch (mode) {
       case 'recording':
@@ -837,10 +851,14 @@
         await state.audioContext.resume();
       }
 
-      const source = state.audioContext.createMediaStreamSource(state.audioStream);
+      // Disconnect previous mic source node if any (prevent leak)
+      if (state.micSource) {
+        try { state.micSource.disconnect(); } catch (_) { /* ignore */ }
+      }
+      state.micSource = state.audioContext.createMediaStreamSource(state.audioStream);
       state.analyser = state.audioContext.createAnalyser();
       state.analyser.fftSize = 256;
-      source.connect(state.analyser);
+      state.micSource.connect(state.analyser);
 
       // Start recording
       state.audioChunks = [];
@@ -877,6 +895,11 @@
       state.mediaRecorder.stop();
       setVoiceMode('processing');
     }
+    // Disconnect mic source node to avoid Web Audio graph leaks
+    if (state.micSource) {
+      try { state.micSource.disconnect(); } catch (_) { /* ignore */ }
+      state.micSource = null;
+    }
   }
 
   async function sendAudioRecording() {
@@ -901,6 +924,36 @@
 
   // ── Waveform Visualization ─────────────────────────────
 
+  // Speech energy threshold for the browser-side VAD indicator.
+  // This is a UI-only hint -- actual VAD runs server-side via Silero.
+  const SPEECH_ENERGY_THRESHOLD = 0.015;
+
+  function computeSpeechEnergy(analyser) {
+    // Compute energy from frequency-domain data for a simple speech indicator.
+    const freqData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(freqData);
+    let sum = 0;
+    for (let i = 0; i < freqData.length; i++) {
+      const normalized = freqData[i] / 255.0;
+      sum += normalized * normalized;
+    }
+    return Math.sqrt(sum / freqData.length);
+  }
+
+  function updateVadIndicator(isSpeech) {
+    const txt = dom.voiceStatusText;
+    if (!txt) return;
+    if (state.voiceMode !== 'recording') return;
+
+    if (isSpeech) {
+      txt.textContent = 'SPEECH DETECTED';
+      txt.classList.add('speech-detected');
+    } else {
+      txt.textContent = 'LISTENING...';
+      txt.classList.remove('speech-detected');
+    }
+  }
+
   function drawWaveform() {
     const canvas = dom.waveformCanvas;
     const ctx = canvas.getContext('2d');
@@ -923,6 +976,10 @@
       requestAnimationFrame(draw);
 
       if (!state.analyser) return;
+
+      // Compute speech energy for the VAD indicator
+      const energy = computeSpeechEnergy(state.analyser);
+      updateVadIndicator(energy > SPEECH_ENERGY_THRESHOLD);
 
       const bufferLength = state.analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -1201,6 +1258,29 @@
     ctx.scale(dpr, dpr);
     drawIdleWaveform();
   }
+
+  // ═══════════════════════════════════════════════════════
+  //  TAB VISIBILITY — reconnect on wake from sleep
+  // ═══════════════════════════════════════════════════════
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Tab became visible — check WebSocket health and reconnect if needed
+      if (!state.telemetryWs || state.telemetryWs.readyState > WebSocket.OPEN) {
+        connectTelemetry();
+      }
+      if (!state.chatWs || state.chatWs.readyState > WebSocket.OPEN) {
+        connectChat();
+      }
+      // Re-poll status immediately on wake
+      pollStatus();
+
+      // Resume AudioContext if it was suspended by the browser
+      if (_playbackCtx && _playbackCtx.state === 'suspended') {
+        _playbackCtx.resume();
+      }
+    }
+  });
 
   // ═══════════════════════════════════════════════════════
   //  INITIALIZATION
