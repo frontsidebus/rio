@@ -338,7 +338,7 @@
   // ── Chat WebSocket ─────────────────────────────────────
 
   function connectChat() {
-    if (state.chatWs && state.chatWs.readyState <= WebSocket.OPEN) return;
+    if (state.chatWs && (state.chatWs.readyState === WebSocket.CONNECTING || state.chatWs.readyState === WebSocket.OPEN)) return;
 
     const ws = new WebSocket(`${WS_BASE}/ws/chat`);
     state.chatWs = ws;
@@ -349,12 +349,18 @@
       addSystemMessage('MERLIN terminal online.');
     });
 
+    ws.binaryType = 'blob';
+
     ws.addEventListener('message', (evt) => {
+      // Binary data = TTS audio chunk
+      if (evt.data instanceof Blob) {
+        queueAudioBlob(evt.data);
+        return;
+      }
       try {
         const msg = JSON.parse(evt.data);
         handleChatMessage(msg);
       } catch (e) {
-        // Treat as plain text from MERLIN
         addChatMessage('MERLIN', evt.data);
       }
     });
@@ -395,18 +401,12 @@
 
       case 'stream_end':
         finishStreamingMessage();
-        if (msg.audio_url) {
-          queueAudio(msg.audio_url);
-        }
         setVoiceMode('idle');
         break;
 
       case 'message':
         finishStreamingMessage();
         addChatMessage(msg.sender || 'MERLIN', msg.text || '');
-        if (msg.audio_url) {
-          queueAudio(msg.audio_url);
-        }
         break;
 
       case 'transcription':
@@ -414,12 +414,16 @@
         setVoiceMode('processing');
         break;
 
-      case 'audio':
-        if (msg.url) queueAudio(msg.url);
+      case 'audio_url':
+        // TTS now streamed as binary chunks — ignore legacy audio_url
+        break;
+
+      case 'tts_audio':
+        // Marker before binary audio frame — handled by binary message listener
         break;
 
       case 'error':
-        addSystemMessage(`ERROR: ${msg.text || 'Unknown error'}`);
+        addSystemMessage(`ERROR: ${msg.content || msg.text || 'Unknown error'}`);
         setVoiceMode('idle');
         break;
 
@@ -686,16 +690,25 @@
   //  AUDIO PLAYBACK
   // ═══════════════════════════════════════════════════════
 
-  function queueAudio(url) {
-    // Make URL absolute if relative
-    const audioUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
-    state.audioQueue.push(audioUrl);
-    if (!state.isPlayingAudio) {
-      playNextAudio();
-    }
+  function queueAudioBlob(blob) {
+    state.audioQueue.push(blob);
+    if (!state.isPlayingAudio) playNextAudio();
   }
 
-  function playNextAudio() {
+  function queueTTS(text) {
+    // Fallback: fetch TTS via REST if not streamed over WebSocket
+    if (!text || !text.trim()) return;
+    fetch(`${API_BASE}/api/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+      .then(r => r.blob())
+      .then(blob => queueAudioBlob(blob))
+      .catch(err => console.warn('TTS fetch error:', err));
+  }
+
+  async function playNextAudio() {
     if (state.audioQueue.length === 0) {
       state.isPlayingAudio = false;
       if (state.voiceMode === 'speaking') setVoiceMode('idle');
@@ -705,15 +718,21 @@
     state.isPlayingAudio = true;
     setVoiceMode('speaking');
 
-    const url = state.audioQueue.shift();
+    const blob = state.audioQueue.shift();
+    const url = URL.createObjectURL(blob);
     dom.ttsAudio.src = url;
-    dom.ttsAudio.play().catch((err) => {
+    try {
+      await dom.ttsAudio.play();
+    } catch (err) {
       console.warn('Audio playback error:', err);
       playNextAudio();
-    });
+    }
+    dom.ttsAudio.addEventListener('ended', () => {
+      URL.revokeObjectURL(url);
+      playNextAudio();
+    }, { once: true });
   }
 
-  dom.ttsAudio.addEventListener('ended', playNextAudio);
   dom.ttsAudio.addEventListener('error', () => {
     console.warn('Audio element error');
     playNextAudio();

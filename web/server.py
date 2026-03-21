@@ -269,54 +269,46 @@ async def text_to_speech(request: TTSRequest):
 async def ws_telemetry(ws: WebSocket):
     """Stream simulator telemetry to the browser.
 
-    If the SimConnect bridge is connected, registers a subscriber that
-    forwards every state update. Otherwise sends periodic disconnected
-    status messages so the browser knows the sim is offline.
+    Connects (or reconnects) to the SimConnect bridge on demand and
+    proxies telemetry as JSON. Falls back to polling if the bridge
+    subscriber model isn't active.
     """
     await ws.accept()
     logger.info("Telemetry WebSocket client connected")
 
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=50)
+    import websockets as ws_lib
 
-    async def _on_state(state: SimState) -> None:
-        """Push state into the per-client queue, dropping if full."""
-        payload = {
-            "type": "telemetry",
-            "connected": True,
-            "flight_phase": state.flight_phase.value,
-            "data": json.loads(state.model_dump_json()),
-        }
-        try:
-            queue.put_nowait(payload)
-        except asyncio.QueueFull:
-            # Drop oldest to keep up
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                pass
-
-    subscribed = False
-    if _sim_connected and sim_client is not None:
-        sim_client.subscribe(_on_state)
-        subscribed = True
+    bridge_url = settings.simconnect_bridge_url
 
     try:
-        if subscribed:
-            # Stream from the subscriber queue
-            while True:
-                try:
-                    payload = await asyncio.wait_for(queue.get(), timeout=5.0)
-                    await ws.send_json(payload)
-                except asyncio.TimeoutError:
-                    # Send a heartbeat so the browser knows we are alive
-                    await ws.send_json({"type": "heartbeat", "connected": _sim_connected})
-        else:
-            # No sim connection — send periodic disconnected status
-            while True:
+        while True:
+            # Try to connect directly to the SimConnect bridge WebSocket
+            try:
+                async with ws_lib.connect(bridge_url) as bridge_ws:
+                    logger.info("Telemetry proxy connected to bridge at %s", bridge_url)
+                    await ws.send_json({"type": "telemetry", "connected": True, "data": None})
+
+                    async for raw_msg in bridge_ws:
+                        try:
+                            data = json.loads(raw_msg)
+                            # Detect flight phase
+                            if phase_detector and "position" in data:
+                                try:
+                                    state = SimState.model_validate(data)
+                                    fp = phase_detector.update(state)
+                                    data["flight_phase"] = fp.value
+                                except Exception:
+                                    pass
+                            await ws.send_json({
+                                "type": "telemetry",
+                                "connected": True,
+                                "data": data,
+                            })
+                        except json.JSONDecodeError:
+                            pass
+
+            except (ConnectionRefusedError, OSError, Exception) as exc:
+                logger.debug("Bridge not available (%s), retrying in 3s", exc)
                 await ws.send_json({
                     "type": "telemetry",
                     "connected": False,
@@ -324,17 +316,11 @@ async def ws_telemetry(ws: WebSocket):
                     "data": None,
                 })
                 await asyncio.sleep(3.0)
+
     except WebSocketDisconnect:
         logger.info("Telemetry WebSocket client disconnected")
     except Exception as exc:
         logger.warning("Telemetry WebSocket error: %s", exc)
-    finally:
-        # Remove the subscriber callback to avoid leaking references
-        if subscribed and sim_client is not None:
-            try:
-                sim_client._subscribers.remove(_on_state)
-            except ValueError:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -355,52 +341,93 @@ async def ws_chat(ws: WebSocket):
     await ws.accept()
     logger.info("Chat WebSocket client connected")
 
+    pending_audio_mime: str | None = None
+
     try:
         while True:
-            raw = await ws.receive_text()
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                await ws.send_json({"type": "error", "content": "Invalid JSON"})
+            message = await ws.receive()
+
+            # Handle binary audio data from the browser's MediaRecorder
+            if "bytes" in message and message["bytes"]:
+                audio_bytes = message["bytes"]
+                logger.info("Received %d bytes of audio (mime: %s)", len(audio_bytes), pending_audio_mime)
+                user_text = await _transcribe_audio_bytes(audio_bytes, pending_audio_mime or "audio/webm")
+                pending_audio_mime = None
+                if not user_text:
+                    await ws.send_json({"type": "error", "content": "Could not transcribe audio"})
+                    continue
+                await ws.send_json({"type": "transcription", "text": user_text})
+            elif "text" in message and message["text"]:
+                raw = message["text"]
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    await ws.send_json({"type": "error", "content": "Invalid JSON"})
+                    continue
+
+                # Handle audio_start marker (next message will be binary)
+                if msg.get("type") == "audio_start":
+                    pending_audio_mime = msg.get("mime", "audio/webm")
+                    continue
+
+                user_text = msg.get("text", "")
+                if not user_text:
+                    await ws.send_json({"type": "error", "content": "No text provided"})
+                    continue
+            else:
                 continue
 
-            user_text = msg.get("text", "")
-            audio_b64 = msg.get("audio_base64", "")
-
-            # Transcribe audio if provided
-            if audio_b64:
-                user_text = await _transcribe_base64_audio(audio_b64) or user_text
-
-            if not user_text:
-                await ws.send_json({"type": "error", "content": "No text or audio provided"})
-                continue
-
-            # Send back the resolved user text (useful when it came from audio)
-            if audio_b64:
-                await ws.send_json({"type": "transcript", "content": user_text})
-
-            # Stream Claude response
+            # Stream Claude response with sentence-level TTS
+            tts_enabled = bool(
+                settings.elevenlabs_api_key and settings.voice_id
+            )
+            sentence_buffer = ""
             full_response = ""
+
+            # TTS queue ensures audio chunks are sent in order
+            tts_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            async def _tts_sender():
+                """Sequentially synthesize and send TTS for queued sentences."""
+                while True:
+                    sentence = await tts_queue.get()
+                    if sentence is None:
+                        break  # Poison pill — done
+                    await _send_tts_chunk(ws, sentence)
+
+            tts_task = asyncio.create_task(_tts_sender()) if tts_enabled else None
+
             try:
                 assert claude_client is not None
                 async for chunk in claude_client.chat(user_text):
                     full_response += chunk
                     await ws.send_json({"type": "text", "content": chunk})
+
+                    if tts_enabled:
+                        sentence_buffer += chunk
+                        sent, remaining = _split_at_sentence(sentence_buffer)
+                        if sent:
+                            sentence_buffer = remaining
+                            await tts_queue.put(sent)
+
+                # Flush remaining text to TTS
+                if tts_enabled and sentence_buffer.strip():
+                    await tts_queue.put(sentence_buffer.strip())
+
             except Exception as exc:
                 logger.exception("Claude chat error")
                 await ws.send_json({"type": "error", "content": f"Chat error: {exc}"})
+                if tts_task:
+                    await tts_queue.put(None)
+                    await tts_task
                 continue
 
-            # Provide TTS URL if ElevenLabs is configured and there is text
-            if (
-                full_response.strip()
-                and settings.elevenlabs_api_key
-                and settings.voice_id
-            ):
-                tts_url = "/api/tts"
-                await ws.send_json({"type": "audio_url", "url": tts_url, "text": full_response})
-
             await ws.send_json({"type": "done"})
+
+            # Signal TTS sender to finish and wait for it
+            if tts_task:
+                await tts_queue.put(None)
+                await tts_task
 
     except WebSocketDisconnect:
         logger.info("Chat WebSocket client disconnected")
@@ -411,6 +438,55 @@ async def ws_chat(ws: WebSocket):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _split_at_sentence(text: str) -> tuple[str, str]:
+    """Split text at the last sentence boundary. Returns (complete, remaining)."""
+    # Look for sentence endings followed by a space (to avoid splitting mid-abbreviation)
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in ".!?\n" and (i + 1 >= len(text) or text[i + 1] == " " or text[i + 1] == "\n"):
+            return text[: i + 1].strip(), text[i + 1 :].lstrip()
+    return "", text  # No sentence boundary found yet
+
+
+# Shared httpx client for TTS (avoid creating per-request)
+_tts_client: httpx.AsyncClient | None = None
+
+
+async def _get_tts_client() -> httpx.AsyncClient:
+    global _tts_client
+    if _tts_client is None or _tts_client.is_closed:
+        _tts_client = httpx.AsyncClient(timeout=30.0)
+    return _tts_client
+
+
+async def _send_tts_chunk(ws: WebSocket, text: str) -> None:
+    """Synthesize a sentence and send the audio back over WebSocket as a binary message."""
+    try:
+        client = await _get_tts_client()
+        resp = await client.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{settings.voice_id}/stream",
+            headers={
+                "xi-api-key": settings.elevenlabs_api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json={
+                "text": text,
+                "model_id": "eleven_turbo_v2_5",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75,
+                    "style": 0.3,
+                },
+            },
+        )
+        resp.raise_for_status()
+        # Send audio as binary WebSocket frame — browser will play it
+        await ws.send_json({"type": "tts_audio", "size": len(resp.content)})
+        await ws.send_bytes(resp.content)
+    except Exception as exc:
+        logger.warning("TTS chunk failed: %s", exc)
+
 
 async def _convert_webm_to_wav(webm_bytes: bytes) -> bytes:
     """Convert webm audio to wav using ffmpeg in a subprocess."""
@@ -443,6 +519,25 @@ async def _convert_webm_to_wav(webm_bytes: bytes) -> bytes:
                 Path(p).unlink(missing_ok=True)
             except Exception:
                 pass
+
+
+async def _transcribe_audio_bytes(audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
+    """Convert browser audio to wav and send to Whisper."""
+    if "webm" in mime_type or "ogg" in mime_type:
+        audio_bytes = await _convert_webm_to_wav(audio_bytes)
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{settings.whisper_url}/asr",
+                files={"audio_file": ("audio.wav", audio_bytes, "audio/wav")},
+                params={"encode": "true", "task": "transcribe", "language": "en", "output": "json"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("text", "").strip()
+    except Exception as exc:
+        logger.error("Whisper transcription failed: %s", exc)
+        return ""
 
 
 async def _transcribe_base64_audio(audio_b64: str) -> str:
