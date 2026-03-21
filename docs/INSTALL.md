@@ -1,6 +1,6 @@
-# MERLIN -- Local Installation Guide
+# MERLIN -- Installation Guide
 
-This guide walks you through setting up MERLIN on a Windows machine with MSFS 2024. By the end, you will have the SimConnect bridge reading telemetry, Docker services running Whisper and ChromaDB, and the orchestrator ready to accept voice or text input.
+This guide walks you through setting up MERLIN on a Windows machine with MSFS 2024. By the end, you will have the SimConnect bridge reading telemetry, Docker services running Whisper and ChromaDB, and the web UI serving the cockpit display in your browser.
 
 ---
 
@@ -11,7 +11,7 @@ This guide walks you through setting up MERLIN on a Windows machine with MSFS 20
 - **Windows 10 (build 19041+) or Windows 11** -- required for MSFS 2024 and WSL2.
 - **Microphone** -- for voice input to Whisper STT.
 - **Speakers or headset** -- for MERLIN's TTS output via ElevenLabs.
-- **GPU (optional)** -- an NVIDIA GPU with CUDA support accelerates Whisper transcription significantly. Not required; CPU inference works but is slower.
+- **GPU (optional)** -- an NVIDIA GPU with CUDA support accelerates Whisper transcription. Not required; CPU inference works but is slower.
 
 ### Software
 
@@ -19,25 +19,20 @@ This guide walks you through setting up MERLIN on a Windows machine with MSFS 20
 |---|---|---|
 | [Microsoft Flight Simulator 2024](https://www.xbox.com/games/microsoft-flight-simulator-2024) | Latest | Steam or Microsoft Store |
 | MSFS 2024 SDK | Bundled with sim | See installation steps below |
-| [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) | 8.0+ | For building the SimConnect bridge |
+| [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) | 8.0+ | For building the SimConnect bridge (Windows only) |
 | [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) | Latest | With WSL2 backend enabled |
 | [Git](https://git-scm.com/downloads) | Any recent | For cloning the repository |
-| [Python 3.11+](https://www.python.org/downloads/) | 3.11 or 3.12 | Only needed if running the orchestrator outside Docker |
 
 ### API Keys
 
-You need two API keys:
-
 | Service | Purpose | Where to get it |
 |---|---|---|
-| **Anthropic** | Claude inference (the AI brain) | [console.anthropic.com](https://console.anthropic.com/) -- sign up, create an API key under Settings > API Keys |
-| **ElevenLabs** | Text-to-speech (MERLIN's voice) | [elevenlabs.io](https://elevenlabs.io/) -- sign up, find your API key in Profile > API Keys |
-
-ElevenLabs is optional if you only want text-mode interaction. Anthropic is required.
+| **Anthropic** | Claude inference (required) | [console.anthropic.com](https://console.anthropic.com/) -- Settings > API Keys |
+| **ElevenLabs** | Text-to-speech (required for voice) | [elevenlabs.io](https://elevenlabs.io/) -- Profile > API Keys |
 
 ---
 
-## Step-by-Step Installation
+## Step-by-Step Setup
 
 ### 1. Clone the Repository
 
@@ -46,88 +41,71 @@ git clone https://github.com/frontsidebus/airdale.git
 cd airdale
 ```
 
-### 2. Install and Configure Docker Desktop
-
-1. Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
-2. During setup, ensure **Use WSL 2 based engine** is selected.
-3. After installation, open Docker Desktop and verify it is running (whale icon in the system tray).
-4. In Docker Desktop Settings > Resources > WSL Integration, enable integration with your default WSL distro if you plan to run commands from WSL.
-
-Verify Docker is working:
+### 2. Configure Environment Variables
 
 ```bash
-docker --version
-docker compose version
+cp .env.example .env
 ```
+
+Open `.env` and fill in the required values:
+
+```bash
+# Required
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Required for voice output
+ELEVENLABS_API_KEY=your-key-here
+ELEVENLABS_VOICE_ID=your-voice-id-here
+```
+
+**Finding an ElevenLabs voice ID:** Log in to [elevenlabs.io](https://elevenlabs.io/), go to **Voices**, select a voice, and copy the Voice ID from the voice details panel.
+
+All other settings have sensible defaults. See `.env.example` for the full list.
 
 ### 3. Install the MSFS 2024 SDK
 
 The SimConnect bridge requires `Microsoft.FlightSimulator.SimConnect.dll` from the MSFS SDK.
 
 1. Launch MSFS 2024.
-2. Go to **Options > General > Developers**.
-3. Enable **Developer Mode**.
-4. In the Developer menu bar that appears at the top of the sim, click **Help > SDK Installer**.
-5. Run the installer and note the install location. Typical paths:
-   - `C:\MSFS SDK\`
-   - `C:\MSFS2024SDK\`
-6. After installation, confirm this file exists:
+2. Go to **Options > General > Developers** and enable **Developer Mode**.
+3. In the Developer menu bar, click **Help > SDK Installer**.
+4. Run the installer. The default install path is:
+   - `C:\MSFS 2024 SDK\`
+5. Confirm this file exists:
    ```
-   C:\MSFS SDK\SimConnect SDK\lib\managed\Microsoft.FlightSimulator.SimConnect.dll
+   C:\MSFS 2024 SDK\SimConnect SDK\lib\managed\Microsoft.FlightSimulator.SimConnect.dll
    ```
+
+**Important:** After the SDK install, run the **SimConnect MSI installer** located at:
+```
+C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.msi
+```
+This registers the SimConnect COM components. You may need to re-run this MSI after major MSFS updates.
 
 ### 4. Build the SimConnect Bridge
 
-Open a terminal (PowerShell, CMD, or Windows Terminal) and navigate to the bridge directory:
+Open a Windows terminal (PowerShell or CMD) -- the bridge must run natively on Windows, not in WSL.
 
 ```bash
 cd simconnect-bridge
 ```
 
-**Check the SimConnect DLL path.** Open `SimConnectBridge.csproj` and verify the `HintPath` matches your SDK installation:
+Verify the SimConnect DLL path in `SimConnectBridge.csproj` matches your SDK install:
 
 ```xml
-<Reference Include="Microsoft.FlightSimulator.SimConnect">
-  <HintPath>C:\MSFS SDK\SimConnect SDK\lib\managed\Microsoft.FlightSimulator.SimConnect.dll</HintPath>
-  <Private>true</Private>
-</Reference>
+<HintPath>C:\MSFS 2024 SDK\SimConnect SDK\lib\managed\Microsoft.FlightSimulator.SimConnect.dll</HintPath>
 ```
 
-If your SDK installed to a different location (e.g., `C:\MSFS2024SDK\`), update the path accordingly.
-
-Build the project:
+Build:
 
 ```bash
 dotnet restore
 dotnet build
 ```
 
-You should see `Build succeeded` with no errors. If you get a missing assembly error for `Microsoft.FlightSimulator.SimConnect`, the HintPath is incorrect.
+You should see `Build succeeded`. If you get a missing assembly error, update the HintPath.
 
-### 5. Configure Environment Variables
-
-From the repository root:
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` in your editor and fill in the required values:
-
-```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-your-key-here
-
-# Required for voice output (optional for text-only mode)
-ELEVENLABS_API_KEY=your-key-here
-ELEVENLABS_VOICE_ID=your-voice-id-here
-```
-
-**Finding an ElevenLabs voice ID:** Log in to [elevenlabs.io](https://elevenlabs.io/), go to **Voices**, select a voice, and copy the Voice ID from the voice details panel. Voices with a "conversational" or "narrative" style work well for MERLIN.
-
-All other settings have sensible defaults. See the comments in `.env.example` for the full list of options.
-
-### 6. Start Docker Services
+### 5. Start Docker Services
 
 From the repository root:
 
@@ -135,202 +113,141 @@ From the repository root:
 docker compose up -d
 ```
 
-This starts three services:
+This starts:
 
 | Service | Container | Port | Purpose |
 |---|---|---|---|
-| Whisper | `merlin-whisper` | 9000 | Local speech-to-text via HTTP API |
+| Whisper | `merlin-whisper` | 9090 | Local speech-to-text (OpenAI-compatible API) |
 | ChromaDB | `merlin-chromadb` | 8000 | Vector store for RAG document retrieval |
-| Orchestrator | `merlin-orchestrator` | 8081 | MERLIN's brain (optional -- you can also run it natively) |
+| Orchestrator | `merlin-orchestrator` | 3838 | Web server + MERLIN brain |
 
-The first startup will pull Docker images and download the Whisper model. This can take several minutes depending on your connection speed and the model size.
-
-**For development**, use the dev override to get faster startup (tiny Whisper model) and hot-reload:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-```
-
-### 7. Verify Services Are Running
-
-**Check container status:**
-
-```bash
-docker compose ps
-```
-
-All services should show `Up` or `Up (healthy)`.
-
-**Check Whisper health:**
-
-```bash
-curl http://localhost:9000/docs
-```
-
-You should get an HTML page (the Swagger docs). If the endpoint is not yet ready, Whisper is still downloading the model -- check logs:
+**First startup downloads the Whisper `small` model (~500 MB).** This can take several minutes. Monitor progress:
 
 ```bash
 docker compose logs -f whisper
 ```
 
-**Check ChromaDB health:**
+The model is cached in a Docker volume (`whisper_cache`), so subsequent starts are fast.
+
+### 6. Verify Services
 
 ```bash
+# Check all containers are running
+docker compose ps
+
+# Whisper health (should return HTML docs page)
+curl http://localhost:9090/docs
+
+# ChromaDB health
 curl http://localhost:8000/api/v1/heartbeat
 ```
 
-Expected response: `{"nanosecond heartbeat": <timestamp>}`
+### 7. Start the SimConnect Bridge
 
-### 8. Ingest Your First Flight Manual
-
-Place a text file (aircraft POH, procedures manual, or similar) in the `data/` directory, then use the context store to ingest it. From the orchestrator environment:
+With MSFS 2024 running, open a Windows terminal:
 
 ```bash
-cd orchestrator
-python -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
-pip install -e .
-
-python -c "
-import asyncio
-from orchestrator.context_store import ContextStore
-
-async def main():
-    store = ContextStore('./data/chromadb')
-    count = await store.ingest_document(
-        'data/your-manual.txt',
-        metadata={'aircraft_type': 'Cessna 172'}
-    )
-    print(f'Ingested {count} chunks')
-
-asyncio.run(main())
-"
+cd simconnect-bridge
+dotnet run
 ```
 
-The store accepts plain text files. PDF and other formats should be converted to text first.
+The bridge connects to MSFS and streams telemetry over WebSocket on port 8080. It retries the connection every 5 seconds if MSFS is not yet running.
 
-### 9. Download FAA Data
+### 8. Open the Browser UI
 
-MERLIN uses the public [Aviation API](https://api.aviationapi.com/) for airport lookups. No separate data download is required -- lookups are made on demand over HTTP. Airport data is cached locally based on the `AIRPORT_CACHE_TTL` setting (default: 1 hour).
+Navigate to [http://localhost:3838](http://localhost:3838). The cockpit display will show live telemetry once the bridge connects. Use the chat panel or microphone button to interact with MERLIN.
 
-### 10. Run the Orchestrator
+> **Note:** Docker Compose maps the orchestrator to port 3838. When running locally via `python run.py` (outside Docker), the dev server also defaults to port 3838.
 
-You have two options for running the orchestrator:
+---
 
-**Option A: Inside Docker (recommended)**
+## WSL2 Networking
 
-If you started all services with `docker compose up -d`, the orchestrator is already running. Attach to it:
+If you run Docker inside WSL2 and the SimConnect bridge on the Windows host, `localhost` inside WSL2 does not reach the Windows host. You must set `SIMCONNECT_WS_HOST` to the Windows host IP.
+
+Find your Windows host IP from WSL:
 
 ```bash
-docker attach merlin-orchestrator
+powershell.exe -c "ipconfig" | grep "IPv4"
 ```
 
-**Option B: Natively on your machine**
+Or from Windows:
 
-This is useful during development or if you need direct microphone access for voice input:
+```powershell
+(Get-NetIPAddress -InterfaceAlias "vEthernet (WSL*)" -AddressFamily IPv4).IPAddress
+```
+
+Update `.env`:
 
 ```bash
-cd orchestrator
-python -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-merlin
+SIMCONNECT_WS_HOST=172.x.x.x    # your Windows host IP
 ```
 
-When running natively, make sure your `.env` file points to the correct service URLs:
-
-```bash
-WHISPER_URL=http://localhost:9000
-SIMCONNECT_BRIDGE_URL=ws://localhost:8080
-```
-
-You should see:
-
-```
-=== MERLIN AI Co-Pilot ===
-Type your message, or 'voice' to toggle voice input.
-Commands: /voice, /vad, /ptt, /capture, /clear, /quit
-```
-
-MERLIN is ready.
+The Docker Compose file already configures the orchestrator container to use `host.docker.internal` for the bridge URL, which resolves correctly when using Docker Desktop. This setting is only needed if you run the web server outside Docker.
 
 ---
 
 ## Troubleshooting
 
-### SimConnect Connection Failures
+### SimConnect COM Errors
 
-**Symptom:** `Could not connect to SimConnect bridge` or `COMException` when starting the bridge.
+**Symptom:** `COMException` or `Could not connect to SimConnect` when starting the bridge.
 
-- Ensure MSFS 2024 is running **before** you start the SimConnect bridge.
+- Ensure MSFS 2024 is running before starting the bridge.
+- Run (or re-run) the SimConnect MSI installer: `C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.msi`. This is required after MSFS updates that reset COM registration.
 - Verify Developer Mode is enabled in MSFS (Options > General > Developers).
-- Confirm the SimConnect DLL path in `SimConnectBridge.csproj` is correct.
-- If you recently updated MSFS, the SDK may need reinstalling. Run the SDK Installer again from the Developer menu.
-- The bridge retries the connection every 5 seconds by default. You can start it before MSFS and let it wait.
+- Confirm the DLL path in `SimConnectBridge.csproj` is correct.
+- The bridge must run as a native Windows process, not inside WSL or Docker.
 
-**Symptom:** Bridge connects but no telemetry appears.
+### Whisper Model Download Time
+
+The default `small` model (~500 MB) downloads on first container start. Larger models (`medium`, `large-v3`) can exceed 3 GB.
+
+- Check download progress: `docker compose logs -f whisper`
+- The model is cached in the `whisper_cache` Docker volume -- subsequent starts are fast.
+- For faster development iteration, set `WHISPER_MODEL=tiny` in `.env` (~75 MB).
+- If behind a corporate proxy, configure Docker Desktop proxy settings under Settings > Resources > Proxies.
+
+### ChromaDB v2 API
+
+Recent versions of ChromaDB have migrated to a v2 API. If you see errors related to API version mismatches:
+
+- Ensure you are using `chromadb/chroma:latest` in `docker-compose.yml` (this is the default).
+- If the orchestrator reports collection errors, clear the persistent data and re-ingest:
+  ```bash
+  rm -rf data/chroma_db
+  docker compose restart chromadb
+  ```
+- The orchestrator uses the ChromaDB HTTP client. Verify the endpoint: `curl http://localhost:8000/api/v1/heartbeat`
+
+### Bridge Connects but No Telemetry
 
 - You must be in an active flight (free flight, bush trip, etc.). The main menu does not expose SimConnect data.
-- Check that you're running the bridge as a native Windows process, not inside WSL or Docker. SimConnect requires native Windows COM interop.
+- Check bridge console output for connection status messages.
 
-### Docker Networking (WSL2 / Windows)
+### Docker Networking Issues
 
-**Symptom:** Orchestrator in Docker cannot reach the SimConnect bridge on `localhost:8080`.
+**Symptom:** Orchestrator cannot reach the SimConnect bridge.
 
-The SimConnect bridge runs on the Windows host, not in Docker. Inside Docker, use `host.docker.internal` instead of `localhost`. The provided `docker-compose.yml` already configures this:
-
-```yaml
-environment:
-  - SIMCONNECT_BRIDGE_URL=ws://host.docker.internal:8080
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-```
-
-If you are running the orchestrator natively (outside Docker), use `ws://localhost:8080`.
-
-**Symptom:** Cannot reach Whisper or ChromaDB from the host.
-
-- Verify ports 9000 and 8000 are not in use by another process: `netstat -ano | findstr :9000`
-- Check Docker Desktop firewall settings.
-- Restart Docker Desktop if port mappings are not working after a system sleep/wake.
-
-### Whisper Model Download Takes Too Long
-
-The default model (`base`) is ~150 MB. Larger models (`medium`, `large-v3`) can be over 3 GB.
-
-- On first start, Whisper downloads the model inside the container. Check progress with `docker compose logs -f whisper`.
-- The model is cached in a Docker volume (`whisper_cache`), so subsequent starts are fast.
-- For faster development iteration, use the dev override which sets the model to `tiny` (~75 MB): `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`
-- If behind a corporate proxy, configure Docker Desktop's proxy settings under Settings > Resources > Proxies.
-
-### ChromaDB Permission Errors
-
-**Symptom:** `PermissionError` or `OSError` when ChromaDB tries to write to `./data/chroma_db`.
-
-- The ChromaDB container mounts `./data/chroma_db` from the host. Ensure this directory exists and is writable:
-  ```bash
-  mkdir -p data/chroma_db
-  ```
-- On Linux/WSL, check that the directory permissions allow the container's user to write:
-  ```bash
-  chmod -R 777 data/chroma_db
-  ```
+- Inside Docker, the bridge is reached via `host.docker.internal`, not `localhost`. The `docker-compose.yml` already configures this.
+- If running the web server natively (outside Docker), use `ws://localhost:8080` in `.env`.
+- Verify ports are not in use: `netstat -ano | findstr :8080`
+- Restart Docker Desktop if port mappings fail after system sleep/wake.
 
 ### Audio Device Issues
 
-**Symptom:** `sounddevice.PortAudioError` or no microphone input.
+**Symptom:** No microphone input in the browser.
 
-- The orchestrator uses `sounddevice` (PortAudio) for microphone access. This requires running **natively on Windows**, not inside Docker or WSL, unless you have PulseAudio forwarding configured.
-- List available audio devices: `python -c "import sounddevice; print(sounddevice.query_devices())"`
-- Set a specific input device in `.env`: `AUDIO_INPUT_DEVICE=1` (use the device index from the list above).
-- If you only want text-mode interaction, audio device issues do not matter. Just type at the `Captain>` prompt.
+- Grant microphone permission when the browser prompts.
+- Use HTTPS or `localhost` -- browsers block microphone access on plain HTTP from non-localhost origins.
+- Check browser developer console for audio errors.
 
 ### Common Error Messages
 
 | Error | Cause | Fix |
 |---|---|---|
-| `anthropic.AuthenticationError` | Invalid or missing Anthropic API key | Check `ANTHROPIC_API_KEY` in `.env` |
-| `ConnectionRefusedError: [Errno 111] Connection refused` (ws://localhost:8080) | SimConnect bridge is not running | Start the bridge first: `cd simconnect-bridge && dotnet run` |
-| `httpx.ConnectError` to port 9000 | Whisper container is not running or still starting | Run `docker compose up -d whisper` and wait for healthy status |
-| `chromadb.errors.NoIndexException` | ChromaDB has no documents ingested yet | Ingest at least one document (see step 8) |
-| `FileNotFoundError: SimConnect.dll` | .NET build cannot find the SimConnect DLL | Update the HintPath in `SimConnectBridge.csproj` |
+| `anthropic.AuthenticationError` | Invalid or missing API key | Check `ANTHROPIC_API_KEY` in `.env` |
+| `ConnectionRefusedError` (ws://...:8080) | Bridge not running | Start: `cd simconnect-bridge && dotnet run` |
+| `httpx.ConnectError` to port 9090 | Whisper not ready | Run `docker compose up -d whisper`, wait for healthy |
+| `FileNotFoundError: SimConnect.dll` | Wrong SDK path | Update HintPath in `SimConnectBridge.csproj` |
+| `COMException` | SimConnect not registered | Re-run `SimConnect.msi` from SDK |
