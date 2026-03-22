@@ -291,7 +291,11 @@ async def get_status():
     chromadb_ok = context_store.available if context_store else False
 
     return {
-        "sim_connected": _sim_connected,
+        "sim_connected": (
+            _sim_connected
+            and sim_client is not None
+            and sim_client.state.connected
+        ),
         "chromadb_available": chromadb_ok,
         "chromadb_documents": (
             context_store.document_count if context_store else 0
@@ -419,13 +423,17 @@ async def ws_telemetry(ws: WebSocket):
                         "Telemetry proxy connected to bridge at %s",
                         bridge_url,
                     )
+                    # Bridge WS is open, but don't claim sim is connected
+                    # until we receive data with connected=true from the bridge
                     await ws.send_json(
-                        {"type": "telemetry", "connected": True, "data": None}
+                        {"type": "telemetry", "connected": False, "data": None}
                     )
 
                     async for raw_msg in bridge_ws:
                         try:
                             data = json.loads(raw_msg)
+                            # Use the bridge's SimConnect status, not WS status
+                            sim_active = data.get("connected", False)
                             # Detect flight phase
                             if phase_detector and "position" in data:
                                 try:
@@ -436,7 +444,7 @@ async def ws_telemetry(ws: WebSocket):
                                     pass
                             await ws.send_json({
                                 "type": "telemetry",
-                                "connected": True,
+                                "connected": sim_active,
                                 "data": data,
                             })
                         except json.JSONDecodeError:
