@@ -70,6 +70,7 @@
     pendingTelemetryData: null,
     chatReconnecting: false,        // suppress duplicate system messages
     telemetryReconnecting: false,
+    simWasConnected: false,           // tracks actual SimConnect status
     wsMessageBuffer: [],            // backpressure buffer
     wsBufferProcessing: false,
     thinkingMsgEl: null,            // "MERLIN is thinking..." indicator
@@ -378,22 +379,29 @@
 
     ws.addEventListener('open', () => {
       state.telemetryReconnectAttempts = 0;
-      setTerminalLed(dom.telemetryLed, true);
       buildTelemetryDOM();
-      if (!state.telemetryReconnecting) {
-        addSystemMessage('Telemetry link established.');
-      } else {
-        // Reconnect succeeded — single quiet message
-        addSystemMessage('Telemetry link restored.');
-      }
       state.telemetryReconnecting = false;
-      updateConnectionQuality();
+      // Don't claim "established" yet — wait for actual sim data
     });
 
     ws.addEventListener('message', (evt) => {
       try {
         const data = JSON.parse(evt.data);
+        const simActive = data.connected === true;
+
+        // Update sim LED based on actual SimConnect status, not WS status
+        setTerminalLed(dom.telemetryLed, simActive);
+
+        if (simActive && !state.simWasConnected) {
+          addSystemMessage('Telemetry link established — sim connected.');
+          state.simWasConnected = true;
+        } else if (!simActive && state.simWasConnected) {
+          addSystemMessage('Sim disconnected — telemetry paused.');
+          state.simWasConnected = false;
+        }
+
         updateTelemetryValues(data);
+        updateConnectionQuality();
       } catch (_) {
         // Telemetry parse error — silently discard malformed frames
       }
