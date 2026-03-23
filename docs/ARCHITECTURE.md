@@ -244,6 +244,43 @@ Barge-in: new user input cancels in-flight Claude stream + TTS immediately
 
 ---
 
+## LLM Abstraction Layer
+
+The orchestrator uses a backend-agnostic LLM client interface (`orchestrator/orchestrator/llm/`) that supports both cloud and local inference with zero changes to the conversation loop, tool dispatch, or persona management.
+
+### `LLMClient` Protocol
+
+The `LLMClient` protocol (`llm/base.py`) defines the streaming interface that all backends must implement:
+
+- `model` property -- returns the model identifier in use
+- `stream()` async generator -- yields a unified `StreamEvent` sequence: `TextDelta`, `ToolCallStart`, `ToolCallDelta`, `ToolCallEnd`, `ResponseComplete`
+
+### Backend Implementations
+
+| Backend | Class | Config Value | SDK |
+|---|---|---|---|
+| Anthropic Claude | `AnthropicClient` (`llm/anthropic_client.py`) | `LLM_BACKEND=anthropic` | `anthropic` |
+| Local vLLM/SGLang | `OpenAICompatClient` (`llm/openai_compat_client.py`) | `LLM_BACKEND=local` | `openai` |
+
+The `OpenAICompatClient` handles message format conversion (Anthropic-style to OpenAI chat format), tool definition translation (Anthropic `input_schema` to OpenAI `function` wrappers), and streaming chunk mapping.
+
+### Factory
+
+```python
+from orchestrator.llm import create_llm_client
+client = create_llm_client(settings)  # reads settings.llm_backend
+```
+
+The `create_llm_client()` factory in `llm/__init__.py` uses lazy imports so only the selected backend's SDK is loaded at runtime.
+
+### Local Airport Database
+
+The `AirportDB` class (`orchestrator/airport_db.py`) provides offline airport lookups via a local SQLite database, replacing the external aviationapi.com HTTP dependency. It includes runway and frequency data from OurAirports public-domain data. Build the database with `python tools/build_airport_db.py`.
+
+> For the full local inference stack design, see [docs/local-inference/ARCHITECTURE.md](local-inference/ARCHITECTURE.md).
+
+---
+
 ## Docker Services
 
 ### Service Topology

@@ -161,6 +161,63 @@ Navigate to [http://localhost:3838](http://localhost:3838). The cockpit display 
 
 ---
 
+## Local Inference Setup (RIO)
+
+To run MERLIN with fully local AI inference (no Anthropic or ElevenLabs API keys needed), use the local inference Docker Compose configuration.
+
+### GPU Requirements
+
+Local inference requires an NVIDIA GPU with the [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed.
+
+| Hardware Tier | GPU | VRAM | Notes |
+|---|---|---|---|
+| Recommended | NVIDIA RTX 5090 | 32 GB | All models fit comfortably |
+| Minimum | NVIDIA RTX 4090 | 24 GB | Tight fit; use Q3 quantization or CPU embeddings |
+
+See [docs/local-inference/COST_ESTIMATE.md](local-inference/COST_ESTIMATE.md) for full hardware recommendations and build specs.
+
+### Model Downloads
+
+Model weights are stored in the `models/` directory (git-ignored). Download or place models into the appropriate subdirectories:
+
+```
+models/
+├── llm/          # Qwen3.5-35B-A3B (~20 GB)
+├── stt/          # faster-whisper large-v3-turbo (~3 GB)
+├── tts/          # Kokoro TTS voice pack (~1 GB)
+└── embeddings/   # Sentence-transformer (~100 MB)
+```
+
+The `docker-compose.local.yml` file mounts these directories into their respective containers. See [models/README.md](../models/README.md) for details.
+
+### Build the Airport Database
+
+```bash
+python tools/build_airport_db.py
+```
+
+This downloads OurAirports public-domain data and builds `data/airports.db` for offline airport lookups.
+
+### Start the Local Stack
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+
+For development with smaller models and hot-reload:
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.local.override.yml up -d
+```
+
+Monitor the LLM service startup (model loading can take a few minutes):
+
+```bash
+docker compose -f docker-compose.local.yml logs -f llm
+```
+
+---
+
 ## WSL2 Networking
 
 If you run Docker inside WSL2 and the SimConnect bridge on the Windows host, `localhost` inside WSL2 does not reach the Windows host. You must set `SIMCONNECT_WS_HOST` to the Windows host IP.
