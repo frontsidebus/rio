@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(description="Anthropic API key for Claude")
     elevenlabs_api_key: str = Field(default="", description="ElevenLabs API key for TTS")
 
+    # --- LLM backend ---------------------------------------------------------
+    llm_backend: str = Field(
+        default="anthropic",
+        description="LLM backend: 'anthropic' for Claude API, 'local' for vLLM/SGLang",
+    )
+    llm_api_url: str = Field(
+        default="http://localhost:8081/v1",
+        description="Base URL for local OpenAI-compatible inference server",
+    )
+    llm_model_local: str = Field(
+        default="qwen3.5-35b-a3b-aviation",
+        description="Model name to request from the local inference server",
+    )
+
     # --- Claude --------------------------------------------------------------
     claude_model: str = Field(
         default="claude-sonnet-4-20250514",

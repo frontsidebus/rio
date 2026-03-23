@@ -1,0 +1,279 @@
+{
+  "version": "1.0",
+  "description": "Mock tool response payloads for RIO Phase 1.3 parity testing",
+  "responses": {
+    "get_sim_state": {
+      "aircraft": "Cessna 172 Skyhawk",
+      "flight_phase": "CRUISE",
+      "position": {
+        "lat": 28.6,
+        "lon": -81.1,
+        "altitude_msl": 6500,
+        "altitude_agl": 6400
+      },
+      "attitude": {
+        "pitch": 2.0,
+        "bank": 0.0,
+        "heading_magnetic": 42,
+        "heading_true": 45
+      },
+      "speeds": {
+        "indicated_airspeed": 120,
+        "true_airspeed": 130,
+        "ground_speed": 135,
+        "mach": 0.2,
+        "vertical_speed": 50
+      },
+      "engines": {
+        "engine_count": 1,
+        "engines": [
+          {
+            "rpm": 2400,
+            "manifold_pressure": 24.0,
+            "fuel_flow_gph": 9.0,
+            "egt": 1200,
+            "oil_temp": 190,
+            "oil_pressure": 60
+          }
+        ]
+      },
+      "autopilot": {
+        "master": true,
+        "heading": 45,
+        "altitude": 6500,
+        "vertical_speed": 0,
+        "airspeed": 0
+      },
+      "fuel": {
+        "total_gallons": 32.5,
+        "total_weight_lbs": 195.0
+      },
+      "environment": {
+        "wind": "270\u00b0 at 8kt",
+        "visibility_sm": 10.0,
+        "temperature_c": 5,
+        "barometer_inhg": 29.92
+      },
+      "surfaces": {
+        "gear_handle": false,
+        "flaps_percent": 0,
+        "spoilers_percent": 0
+      },
+      "on_ground": false
+    },
+    "lookup_airport": {
+      "KJFK": {
+        "identifier": "KJFK",
+        "name": "JOHN F KENNEDY INTL",
+        "city": "NEW YORK",
+        "state": "NEW YORK",
+        "elevation": "13",
+        "latitude": "40.6413",
+        "longitude": "-73.7781",
+        "status": "O"
+      },
+      "KLAX": {
+        "identifier": "KLAX",
+        "name": "LOS ANGELES INTL",
+        "city": "LOS ANGELES",
+        "state": "CALIFORNIA",
+        "elevation": "126",
+        "latitude": "33.9425",
+        "longitude": "-118.408",
+        "status": "O"
+      },
+      "KMCO": {
+        "identifier": "KMCO",
+        "name": "ORLANDO INTL",
+        "city": "ORLANDO",
+        "state": "FLORIDA",
+        "elevation": "96",
+        "latitude": "28.4294",
+        "longitude": "-81.309",
+        "status": "O"
+      },
+      "KJAX": {
+        "identifier": "KJAX",
+        "name": "JACKSONVILLE INTL",
+        "city": "JACKSONVILLE",
+        "state": "FLORIDA",
+        "elevation": "30",
+        "latitude": "30.4941",
+        "longitude": "-81.6879",
+        "status": "O"
+      },
+      "KORD": {
+        "identifier": "KORD",
+        "name": "CHICAGO OHARE INTL",
+        "city": "CHICAGO",
+        "state": "ILLINOIS",
+        "elevation": "680",
+        "latitude": "41.9742",
+        "longitude": "-87.9073",
+        "status": "O"
+      },
+      "KATL": {
+        "identifier": "KATL",
+        "name": "HARTSFIELD-JACKSON ATLANTA INTL",
+        "city": "ATLANTA",
+        "state": "GEORGIA",
+        "elevation": "1026",
+        "latitude": "33.6407",
+        "longitude": "-84.4277",
+        "status": "O"
+      },
+      "KSFB": {
+        "identifier": "KSFB",
+        "name": "ORLANDO SANFORD INTL",
+        "city": "SANFORD",
+        "state": "FLORIDA",
+        "elevation": "55",
+        "latitude": "28.7776",
+        "longitude": "-81.2375",
+        "status": "O"
+      },
+      "KORL": {
+        "identifier": "KORL",
+        "name": "ORLANDO EXECUTIVE",
+        "city": "ORLANDO",
+        "state": "FLORIDA",
+        "elevation": "113",
+        "latitude": "28.5455",
+        "longitude": "-81.3329",
+        "status": "O"
+      },
+      "KMIA": {
+        "identifier": "KMIA",
+        "name": "MIAMI INTL",
+        "city": "MIAMI",
+        "state": "FLORIDA",
+        "elevation": "11",
+        "latitude": "25.7959",
+        "longitude": "-80.287",
+        "status": "O"
+      }
+    },
+    "search_manual": [
+      {
+        "content": "V-speeds for Cessna 172S: Vs0=40 KIAS, Vs1=48 KIAS, Vr=55 KIAS, Vx=62 KIAS, Vy=74 KIAS, Vfe=85 KIAS (full), Vno=129 KIAS, Vne=163 KIAS, Va=99 KIAS (max gross).",
+        "source": "c172s_poh.pdf"
+      },
+      {
+        "content": "Engine failure during cruise: 1. Airspeed - 68 KIAS (best glide). 2. Fuel selector - BOTH. 3. Mixture - RICH. 4. Carburetor heat - ON. 5. Primer - IN and LOCKED. 6. Ignition switch - BOTH (or START if prop stopped). 7. If engine does not restart, proceed to forced landing procedure.",
+        "source": "c172s_poh.pdf"
+      },
+      {
+        "content": "Normal climb power settings: Full throttle, 2400 RPM for fixed-pitch propeller aircraft. Climb at 75-85 KIAS for best rate of climb (Vy). Reduce to 62 KIAS for best angle of climb (Vx) when obstacle clearance is needed.",
+        "source": "c172s_poh.pdf"
+      },
+      {
+        "content": "Cruise power settings: 2100-2400 RPM. Lean mixture for maximum RPM or to manufacturer's recommendations. Monitor EGT and keep within limits. Typical fuel consumption at 75% power: 8.5-9.5 GPH.",
+        "source": "c172s_poh.pdf"
+      },
+      {
+        "content": "Departure procedure: After takeoff, maintain runway heading until reaching 500ft AGL. Begin crosswind turn if remaining in the pattern, or turn on course as assigned by ATC. Retract flaps on schedule as airspeed permits.",
+        "source": "c172s_poh.pdf"
+      }
+    ],
+    "get_checklist": {
+      "PREFLIGHT": {
+        "phase": "PREFLIGHT",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "Documents - CHECK (ARROW)",
+          "Weather briefing - OBTAINED",
+          "NOTAMs - REVIEWED",
+          "Weight and balance - COMPUTED",
+          "Fuel - CHECKED AND SUFFICIENT",
+          "Preflight inspection - COMPLETE",
+          "Seat belts - FASTENED",
+          "Circuit breakers - CHECK"
+        ]
+      },
+      "TAXI": {
+        "phase": "TAXI",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "Brakes - TEST",
+          "Flight instruments - CHECK",
+          "Radios - SET",
+          "Transponder - SET",
+          "Taxi clearance - OBTAINED"
+        ]
+      },
+      "TAKEOFF": {
+        "phase": "TAKEOFF",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "Flaps - SET FOR TAKEOFF",
+          "Trim - SET",
+          "Mixture - RICH (or as required)",
+          "Fuel pump - ON",
+          "Lights - ON",
+          "Doors - SECURE",
+          "Controls - FREE AND CORRECT",
+          "Takeoff clearance - OBTAINED"
+        ]
+      },
+      "DESCENT": {
+        "phase": "DESCENT",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "ATIS/Weather - OBTAIN",
+          "Altimeter - SET",
+          "Approach briefing - COMPLETE",
+          "Fuel pump - ON",
+          "Seat belts - SECURE"
+        ]
+      },
+      "LANDING": {
+        "phase": "LANDING",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "Gear - CONFIRMED DOWN",
+          "Flaps - FULL (as required)",
+          "Speed - Vref + corrections",
+          "Runway - CLEAR"
+        ]
+      },
+      "LANDED": {
+        "phase": "LANDED",
+        "aircraft": "Cessna 172 Skyhawk",
+        "source": "default",
+        "items": [
+          "Flaps - RETRACT",
+          "Transponder - STANDBY",
+          "Lights - AS REQUIRED",
+          "Mixture - CUTOFF (shutdown)",
+          "Master switch - OFF (shutdown)"
+        ]
+      }
+    },
+    "create_flight_plan": {
+      "departure": {
+        "identifier": "KMCO",
+        "name": "ORLANDO INTL",
+        "city": "ORLANDO",
+        "state": "FLORIDA",
+        "elevation": "96"
+      },
+      "destination": {
+        "identifier": "KJAX",
+        "name": "JACKSONVILLE INTL",
+        "city": "JACKSONVILLE",
+        "state": "FLORIDA",
+        "elevation": "30"
+      },
+      "cruise_altitude": 5500,
+      "route": "KMCO KJAX",
+      "waypoints": ["KMCO", "KJAX"],
+      "status": "draft",
+      "notes": "This is a draft plan. Verify airways, altitudes, and NOTAMs before use."
+    }
+  }
+}

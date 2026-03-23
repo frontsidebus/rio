@@ -7,10 +7,23 @@ from typing import Any
 
 import httpx
 
+from .airport_db import AirportDB
 from .context_store import ContextStore
 from .sim_client import FlightPhase, SimConnectClient
 
 logger = logging.getLogger(__name__)
+
+# Shared local airport database instance (lazy-init on first use).
+_airport_db: AirportDB | None = None
+
+
+def _get_airport_db() -> AirportDB:
+    """Return the shared AirportDB instance, creating it on first call."""
+    global _airport_db
+    if _airport_db is None:
+        _airport_db = AirportDB()
+    return _airport_db
+
 
 # Phase-appropriate checklists (simplified defaults; real ones come from the context store)
 DEFAULT_CHECKLISTS: dict[FlightPhase, list[str]] = {
@@ -163,7 +176,28 @@ async def get_sim_state(sim_client: SimConnectClient) -> dict[str, Any]:
 
 
 async def lookup_airport(identifier: str) -> dict[str, Any]:
-    """Look up airport information from the Aviation API."""
+    """Look up airport information by ICAO or FAA identifier.
+
+    Uses the local SQLite database (data/airports.db) by default.
+    Falls back to the aviationapi.com HTTP API if the local DB is
+    unavailable or does not contain the requested airport.
+    """
+    db = _get_airport_db()
+
+    # Try local database first
+    if db.available:
+        result = db.lookup(identifier)
+        if result is not None:
+            logger.debug("Airport %s resolved from local DB", result["identifier"])
+            return result
+        logger.debug("Airport %s not in local DB, trying HTTP fallback", identifier)
+
+    # HTTP fallback (aviationapi.com)
+    return await _lookup_airport_http(identifier)
+
+
+async def _lookup_airport_http(identifier: str) -> dict[str, Any]:
+    """Fall back to the aviationapi.com HTTP API for airport lookups."""
     identifier = identifier.strip().upper()
     if not identifier.startswith("K") and len(identifier) == 3:
         identifier = f"K{identifier}"
