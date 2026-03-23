@@ -116,7 +116,7 @@ python run.py
 |---|---|
 | SimConnect Bridge | C# / .NET 8 (out-of-process) |
 | Web Server | Python 3.11+ / FastAPI |
-| AI Inference | Anthropic Claude API with tool use |
+| AI Inference | Anthropic Claude API or local vLLM (Qwen3.5-35B-A3B) |
 | Speech-to-Text | faster-whisper (CTranslate2) via Docker |
 | Text-to-Speech | ElevenLabs streaming API |
 | Vector Store / RAG | ChromaDB with sentence-transformers |
@@ -166,7 +166,30 @@ airdale/
 
 - [Installation Guide](docs/INSTALL.md) -- full setup walkthrough with troubleshooting
 - [Architecture](docs/ARCHITECTURE.md) -- system design, data flows, and component descriptions
+- [Local Inference (RIO)](docs/local-inference/) -- architecture, cost estimates, and setup for fully local AI
 - [Project Conventions](CLAUDE.md) -- architecture decisions, code style, development commands
+
+---
+
+## RIO: Local Inference Mode
+
+**RIO** is the codename for MERLIN's local inference fork -- running the entire AI stack on your own hardware with zero cloud API dependencies. RIO replaces Anthropic Claude with a locally-served Qwen3.5-35B-A3B model via vLLM, ElevenLabs with Kokoro TTS, and the external aviation API with a local SQLite airport database.
+
+### Quick Start (Local Mode)
+
+```bash
+# Build the local airport database
+python tools/build_airport_db.py
+
+# Start the full local inference stack (requires NVIDIA GPU)
+docker compose -f docker-compose.local.yml up -d
+```
+
+The local stack includes vLLM (LLM), faster-whisper (STT), Kokoro TTS, ChromaDB, and the orchestrator -- all configured to use local backends. No API keys required.
+
+> **GPU requirement:** Local inference requires an NVIDIA GPU with at least 24 GB VRAM. See [docs/local-inference/COST_ESTIMATE.md](docs/local-inference/COST_ESTIMATE.md) for hardware recommendations.
+
+For the full local inference guide, see [docs/local-inference/](docs/local-inference/).
 
 ---
 

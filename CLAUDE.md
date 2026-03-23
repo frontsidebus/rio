@@ -11,7 +11,7 @@
 | Orchestrator | Python 3.11+ (async, hatch build system) |
 | Web Server | FastAPI with WebSocket support (browser UI) |
 | SimConnect Bridge | C# / .NET 8 (out-of-process exe, event-driven message pump) |
-| AI Inference | Anthropic Claude API with tool use |
+| AI Inference | Anthropic Claude API or local vLLM (Qwen3.5-35B-A3B) via LLM abstraction layer |
 | Vector Store / RAG | ChromaDB with sentence-transformers embeddings |
 | Speech-to-Text | faster-whisper (CTranslate2) `medium` model via Docker |
 | Text-to-Speech | ElevenLabs streaming API (`eleven_multilingual_v2` model) |
@@ -26,6 +26,7 @@ airdale/
 │   ├── orchestrator/            # Source package
 │   │   ├── __init__.py
 │   │   ├── audio_processing.py  # Audio preprocessing (high-pass, trim, normalize)
+│   │   ├── airport_db.py        # Local SQLite airport database (OurAirports data)
 │   │   ├── claude_client.py     # Anthropic API wrapper with MERLIN persona + tools
 │   │   ├── config.py            # Pydantic settings from .env
 │   │   ├── context_store.py     # ChromaDB RAG store with query cache
@@ -36,7 +37,12 @@ airdale/
 │   │   ├── tools.py             # Claude tool implementations
 │   │   ├── tts_preprocessor.py  # ICAO-compliant aviation text preprocessing for TTS
 │   │   ├── voice.py             # Voice I/O (PTT, VAD, barge-in, streaming TTS)
-│   │   └── whisper_client.py    # Whisper ASR HTTP client with retry logic
+│   │   ├── whisper_client.py    # Whisper ASR HTTP client with retry logic
+│   │   └── llm/                 # LLM client abstraction layer
+│   │       ├── __init__.py      # Factory: create_llm_client() dispatches on LLM_BACKEND
+│   │       ├── base.py          # LLMClient protocol, StreamEvent types, ToolDefinition
+│   │       ├── anthropic_client.py  # Anthropic Claude backend
+│   │       └── openai_compat_client.py  # OpenAI-compatible backend (vLLM/SGLang)
 │   ├── tests/                   # Unit tests (pytest + pytest-asyncio)
 │   ├── Dockerfile
 │   └── pyproject.toml           # Build config, dependencies, ruff settings
@@ -63,19 +69,37 @@ airdale/
 │   └── prompts/                 # System prompt templates
 │       ├── merlin_system.md     # MERLIN persona definition
 │       └── merlin_emergency.md  # Emergency procedure prompt overlay
-├── tests/                       # Integration tests (root level)
-│   └── integration/             # End-to-end, WebSocket, tool chain, Whisper pipeline
+├── models/                      # Local model weights (git-ignored)
+│   ├── llm/                     # LLM model files (Qwen3.5-35B-A3B)
+│   ├── stt/                     # STT models (faster-whisper)
+│   ├── tts/                     # TTS voice packs (Kokoro)
+│   └── embeddings/              # Sentence-transformer models
 ├── tools/                       # Developer utilities
+│   ├── build_airport_db.py      # Build local SQLite airport DB from OurAirports data
 │   ├── download_faa_data.py     # FAA data fetcher for RAG ingestion
 │   ├── ingest.py                # Document ingestion into ChromaDB
 │   └── test_tts.py              # ElevenLabs TTS smoke test
+├── tests/                       # Integration tests (root level)
+│   ├── integration/             # End-to-end, WebSocket, tool chain, Whisper pipeline
+│   └── tool_calling/            # LLM tool calling parity tests and benchmark
+│       ├── test_tool_parity.py  # Automated parity tests (Anthropic vs local)
+│       ├── benchmark.py         # Interactive benchmark runner
+│       └── fixtures/            # Test scenarios and mock tool responses
 ├── docs/                        # Project documentation
 │   ├── ARCHITECTURE.md          # System design and data flows
 │   ├── API.md                   # WebSocket protocol reference
 │   ├── GETTING_STARTED.md
-│   └── INSTALL.md
-├── docker-compose.yml           # Production service stack
+│   ├── INSTALL.md
+│   └── local-inference/         # RIO local inference documentation
+│       ├── ARCHITECTURE.md      # Local stack design and component specs
+│       ├── COST_ESTIMATE.md     # Hardware tiers and cost analysis
+│       ├── DATAFLOW.md          # Local data flow diagrams
+│       ├── IMPLEMENTATION.md    # Implementation plan and migration guide
+│       └── TTS_VOICE_SYNTHESIS.md  # Voice cloning and TTS setup
+├── docker-compose.yml           # Production service stack (cloud APIs)
 ├── docker-compose.dev.yml       # Dev overrides (hot-reload, bind mounts)
+├── docker-compose.local.yml     # Local inference stack (vLLM, Kokoro TTS, GPU)
+├── docker-compose.local.override.yml  # Local dev overrides (smaller models)
 ├── .env.example                 # Environment variable template
 ├── .env                         # Local config (git-ignored)
 └── CLAUDE.md                    # This file
@@ -153,6 +177,26 @@ docker compose logs -f orchestrator
 docker compose build --no-cache orchestrator
 ```
 
+### Local Inference (RIO)
+
+```bash
+# Build the local airport database (run once)
+python tools/build_airport_db.py
+
+# Start the full local inference stack (requires NVIDIA GPU)
+docker compose -f docker-compose.local.yml up -d
+
+# Dev mode with smaller models and source bind-mounts
+docker compose -f docker-compose.local.yml -f docker-compose.local.override.yml up -d
+
+# Monitor LLM model loading
+docker compose -f docker-compose.local.yml logs -f llm
+
+# Run tool calling parity benchmark
+cd tests/tool_calling
+python benchmark.py
+```
+
 ### WSL2 Note
 
 When running the orchestrator or web server inside WSL2, the SimConnect bridge runs on the Windows host. Set the bridge URL to reach the host:
@@ -227,13 +271,16 @@ SIMCONNECT_WS_HOST=$(hostname).local       # WSL2 native
 
 20. **Aviation TTS preprocessor** -- Converts LLM output into speakable text following ICAO phraseology: digit-by-digit pronunciation for flight levels, headings, frequencies, runway designators, and squawk codes.
 
+21. **LLM abstraction layer** -- The `LLMClient` protocol (`orchestrator/orchestrator/llm/base.py`) decouples the orchestrator from any specific inference backend. A factory function (`create_llm_client`) reads `LLM_BACKEND` from config and returns either an `AnthropicClient` (Claude API) or `OpenAICompatClient` (vLLM/SGLang). Both emit the same `StreamEvent` types, so the conversation loop, tool dispatch, and persona management are backend-agnostic. Lazy imports ensure only the selected SDK is loaded.
+
+22. **Local-first airport data** -- The `AirportDB` class (`orchestrator/orchestrator/airport_db.py`) replaces the external aviationapi.com HTTP dependency with a local SQLite database built from OurAirports public-domain data. This provides richer data (runways, frequencies) with zero network dependency and is built offline via `python tools/build_airport_db.py`.
+
 ## Testing Approach
 
-- **361 tests passing** across Python and C# test suites.
 - **Python:** pytest + pytest-asyncio for async tests. Mock the WebSocket connection and Claude API in unit tests.
 - **C#:** xUnit. Mock SimConnect for unit tests. Integration tests require MSFS running.
 - **No sim required for most tests** -- Record telemetry snapshots as JSON fixtures and replay them through the orchestrator.
-- **Test categories include:** unit tests (config, flight phase, tools, Claude client, Whisper client, context store, screen capture), integration tests (WebSocket reconnection, health monitor, delta detection, query classification, orchestrator end-to-end, tool chain, Whisper pipeline).
+- **Test categories include:** unit tests (config, flight phase, tools, Claude client, Whisper client, context store, screen capture), integration tests (WebSocket reconnection, health monitor, delta detection, query classification, orchestrator end-to-end, tool chain, Whisper pipeline), and tool calling parity tests (`tests/tool_calling/`) that verify the local LLM backend selects tools and formats arguments comparably to Claude.
 
 ## Environment Variables
 

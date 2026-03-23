@@ -304,6 +304,67 @@ Screen capture works best when running the orchestrator natively on Windows (not
 - ElevenLabs TTS output with streaming playback
 - Docker Compose deployment for Whisper, ChromaDB, and the orchestrator
 
+---
+
+## Running in Local Inference Mode (RIO)
+
+MERLIN can run entirely on local hardware with no cloud API dependencies. This is the **RIO** configuration.
+
+### 1. Build the Airport Database
+
+The local stack uses an offline airport database instead of the external aviation API. Build it once:
+
+```bash
+python tools/build_airport_db.py
+```
+
+This downloads public-domain airport, runway, and frequency data from OurAirports and builds a SQLite database at `data/airports.db`. Use `--refresh` to re-download source data.
+
+### 2. Configure `.env` for Local Backends
+
+```bash
+# Switch to local LLM (instead of Anthropic Claude)
+LLM_BACKEND=local
+LLM_API_URL=http://localhost:8081/v1
+LLM_MODEL_LOCAL=qwen3.5-35b-a3b-aviation
+
+# Switch to local TTS (instead of ElevenLabs)
+TTS_BACKEND=local
+TTS_LOCAL_URL=http://localhost:9091
+TTS_VOICE_ID_LOCAL=merlin-v1
+```
+
+When using `docker-compose.local.yml`, these are set automatically via container environment variables.
+
+### 3. Start the Local Stack
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+
+This starts vLLM (LLM inference), faster-whisper (STT), Kokoro TTS, ChromaDB, and the orchestrator. First startup may take several minutes as vLLM loads model weights into GPU memory.
+
+For development with smaller models and source bind-mounts:
+
+```bash
+docker compose -f docker-compose.local.yml -f docker-compose.local.override.yml up -d
+```
+
+### 4. Run the Tool Calling Benchmark
+
+To verify that the local LLM handles tool calls correctly compared to Claude:
+
+```bash
+cd tests/tool_calling
+python benchmark.py
+```
+
+This runs a suite of aviation scenarios through both backends and compares tool selection, argument accuracy, and response quality.
+
+> **Prerequisite:** Local inference requires an NVIDIA GPU with at least 24 GB VRAM. See [docs/local-inference/COST_ESTIMATE.md](local-inference/COST_ESTIMATE.md) for hardware tiers.
+
+---
+
 ### Coming Soon (Phases 4-6)
 
 **Phase 4 -- Situational Awareness:**
