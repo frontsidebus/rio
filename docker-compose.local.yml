@@ -1,0 +1,206 @@
+# MERLIN - Local Inference Stack (RIO Phase 1.2)
+# Docker Compose configuration for fully local AI inference.
+#
+# This stack replaces cloud APIs (Anthropic, ElevenLabs) with local models:
+#   - vLLM serving Qwen3.5-35B-A3B for LLM inference
+#   - faster-whisper with large-v3-turbo for speech-to-text
+#   - Kokoro TTS for text-to-speech (placeholder)
+#
+# Requires: NVIDIA GPU with nvidia-container-toolkit installed.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d
+#   docker compose -f docker-compose.local.yml logs -f llm
+#
+# GPU note: The LLM and Whisper services share the GPU via CUDA time-sharing.
+# The LLM reserves 80% of VRAM; Whisper and TTS use the remainder.
+
+services:
+  # ---------------------------------------------------------------------------
+  # LLM - vLLM serving Qwen3.5-35B-A3B with OpenAI-compatible API
+  # Provides /v1/chat/completions with tool-calling support.
+  # ---------------------------------------------------------------------------
+  llm:
+    image: vllm/vllm-openai:latest
+    container_name: merlin-llm
+    ports:
+      - "8081:8000"
+    environment:
+      - VLLM_ATTENTION_BACKEND=FLASHINFER
+    volumes:
+      - ./models/llm:/models
+    command: >
+      --model /models/qwen3.5-35b-a3b-aviation
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --guided-decoding-backend outlines
+      --max-model-len 8192
+      --gpu-memory-utilization 0.80
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+    networks:
+      - merlin
+
+  # ---------------------------------------------------------------------------
+  # Whisper - Local speech-to-text via faster-whisper HTTP API
+  # Upgraded to large-v3-turbo for better aviation terminology recognition.
+  # GPU-accelerated; shares the GPU with vLLM via CUDA time-sharing.
+  # ---------------------------------------------------------------------------
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cuda
+    container_name: merlin-whisper
+    ports:
+      - "9090:8000"
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-large-v3-turbo}
+      - WHISPER__INFERENCE_DEVICE=cuda
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - merlin
+
+  # ---------------------------------------------------------------------------
+  # TTS - Local text-to-speech (Kokoro placeholder)
+  # Will be replaced with a proper Kokoro TTS image once available.
+  # ---------------------------------------------------------------------------
+  tts:
+    image: python:3.11-slim
+    container_name: merlin-tts
+    ports:
+      - "9091:9091"
+    volumes:
+      - ./models/tts:/models
+    command: >
+      python -c "
+      from http.server import HTTPServer, BaseHTTPRequestHandler;
+      import json;
+
+      class Handler(BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path == '/health':
+                  self.send_response(200);
+                  self.send_header('Content-Type', 'application/json');
+                  self.end_headers();
+                  self.wfile.write(json.dumps({'status': 'placeholder'}).encode());
+              else:
+                  self.send_response(404);
+                  self.end_headers();
+
+      HTTPServer(('0.0.0.0', 9091), Handler).serve_forever()
+      "
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - merlin
+
+  # ---------------------------------------------------------------------------
+  # ChromaDB - Vector store for RAG (Retrieval-Augmented Generation)
+  # Stores aircraft manuals, checklists, and procedures for context retrieval.
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: merlin-chromadb
+    ports:
+      - "8000:8000"
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - IS_PERSISTENT=TRUE
+    volumes:
+      - ./data/chroma_db:/chroma/chroma
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - merlin
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator - MERLIN's brain (configured for local backends)
+  # Coordinates between local LLM, SimConnect bridge, Whisper, and ChromaDB.
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: merlin-orchestrator
+    ports:
+      - "3838:3838"
+    depends_on:
+      llm:
+        condition: service_healthy
+      whisper:
+        condition: service_healthy
+      tts:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Local backend selection
+      - LLM_BACKEND=local
+      - LLM_API_URL=http://llm:8000/v1
+      - LLM_MODEL_LOCAL=qwen3.5-35b-a3b-aviation
+      - TTS_BACKEND=local
+      - TTS_LOCAL_URL=http://tts:9091
+      - TTS_VOICE_ID_LOCAL=merlin-v1
+      # Internal service URLs (Docker networking)
+      - WHISPER_URL=http://whisper:8000
+      - CHROMADB_URL=http://chromadb:8000
+      # The SimConnect bridge runs on the Windows host
+      - SIMCONNECT_BRIDGE_URL=ws://host.docker.internal:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - merlin
+
+volumes:
+  whisper_cache:
+    driver: local
+
+networks:
+  merlin:
+    name: merlin
+    driver: bridge

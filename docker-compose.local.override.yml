@@ -1,0 +1,53 @@
+# MERLIN - Local Inference Dev Overrides
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml -f docker-compose.local.override.yml up
+#
+# Or set COMPOSE_FILE in your shell:
+#   export COMPOSE_FILE=docker-compose.local.yml:docker-compose.local.override.yml
+#   docker compose up
+
+services:
+  llm:
+    environment:
+      # Reduce context length for faster iteration
+      - VLLM_ATTENTION_BACKEND=FLASHINFER
+    # Override command with smaller context for dev
+    command: >
+      --model /models/qwen3.5-35b-a3b-aviation
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --guided-decoding-backend outlines
+      --max-model-len 4096
+      --gpu-memory-utilization 0.70
+
+  whisper:
+    environment:
+      # Use smaller model for faster startup during development
+      - WHISPER__MODEL=small
+      - WHISPER__INFERENCE_DEVICE=cuda
+
+  chromadb:
+    environment:
+      - LOG_LEVEL=debug
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    # Mount source code for hot-reload during development
+    volumes:
+      - ./orchestrator/orchestrator:/app/orchestrator:ro
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONDONTWRITEBYTECODE=1
+      - MERLIN_DEV_MODE=true
+      - LLM_BACKEND=local
+      - LLM_API_URL=http://llm:8000/v1
+      - LLM_MODEL_LOCAL=qwen3.5-35b-a3b-aviation
+      - TTS_BACKEND=local
+      - TTS_LOCAL_URL=http://tts:9091
+      - TTS_VOICE_ID_LOCAL=merlin-v1
+      - WHISPER_URL=http://whisper:8000
+      - CHROMADB_URL=http://chromadb:8000
+      - SIMCONNECT_BRIDGE_URL=ws://host.docker.internal:8080

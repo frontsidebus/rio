@@ -56,3 +56,10 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# Model weights (large binary files)
+models/llm/*
+models/stt/*
+models/tts/*
+models/embeddings/*
+!models/**/.gitkeep
